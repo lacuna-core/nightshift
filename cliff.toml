@@ -1,0 +1,40 @@
+# Release notes and version numbers, made by git-cliff from the commits on main.
+# The Release workflow uses this file (see "Releases" in README.md).
+
+[changelog]
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | trim | upper_first }}
+{% endfor %}
+{% endfor %}\
+"""
+trim = true
+
+[git]
+conventional_commits = true
+# A commit whose subject is not a Conventional Commit is still listed, under "Other".
+filter_unconventional = false
+# The HTML comments set the order of the groups and are stripped by the template.
+# Commit types: keep in sync with "Allowed types" in CLAUDE.md.
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^(devops|chore|refactor|docs|test|style)", group = "<!-- 5 -->Maintenance" },
+  { message = ".*", group = "<!-- 4 -->Other" },
+]
+filter_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"
+
+# The next version, worked out from the commits since the last tag: a feature raises the
+# minor number, anything else the patch number. Below 1.0 a breaking change raises the
+# minor number as well; going to 1.0 is a decision made by hand, with a tag.
+[bump]
+features_always_bump_minor = true
+breaking_always_bump_major = false
+initial_tag = "v0.1.0"

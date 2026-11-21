@@ -1,0 +1,57 @@
+name: Release
+
+# Publishes a GitHub release of main with the notes of what changed since the last one.
+# Started by hand from the Actions tab. The version is the last v* tag, raised by what the
+# commits since then say (cliff.toml: a feature raises the minor number, anything else the
+# patch number). The release creates the tag; nothing is bumped or tagged by hand.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# contents: write is for the release and its tag.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    env:
+      GIT_CLIFF_VERSION: 2.14.2
+
+    steps:
+      - name: Only main is released
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run this workflow on main, not $GITHUB_REF"
+          exit 1
+
+      # The whole history and the tags: the version and the notes come from them.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out the version and notes
+        run: |
+          pipx install "git-cliff==$GIT_CLIFF_VERSION"
+          version=$(git-cliff --bumped-version)
+          test -n "$version"
+          git-cliff --unreleased --tag "$version" --strip header --output "$RUNNER_TEMP/CHANGES.md"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # Nothing is published when there are no notes: main has not changed since the last
+      # release.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s "$RUNNER_TEMP/CHANGES.md" ]; then
+            echo "No changes since $VERSION, no new release" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --notes-file "$RUNNER_TEMP/CHANGES.md"
+          echo "Released $(gh release view "$VERSION" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"

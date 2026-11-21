@@ -1,0 +1,29 @@
+# `pre-commit install` sets up both hooks: the checks and the commit message.
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        pass_filenames: false
+      - id: ruff-format
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        # Commit types: keep in sync with "Allowed types" in CLAUDE.md.
+        args: [feat, fix, docs, style, refactor, perf, test, devops, chore]

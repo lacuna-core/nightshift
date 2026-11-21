@@ -1,0 +1,2 @@
+- Follow `CLAUDE.md` in this repository.
+- Generate commit messages using the Conventional Commits format: <type>(<scope>): <description>. Types (keep in sync with "Allowed types" in CLAUDE.md): feat, fix, docs, style, refactor, perf, test, devops, chore. Keep the subject line under 72 chars. Use imperative mood.

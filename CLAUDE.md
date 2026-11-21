@@ -1,0 +1,104 @@
+# CLAUDE.md
+
+TODO: one paragraph on what Lacuna is and does, for whoever (or whatever) opens this repo
+first: the problem it solves, who uses it, and its main moving parts.
+
+## Commands
+
+```bash
+uv sync --dev                        # install all dependencies
+uv run pre-commit install            # wire up git hooks, incl. commit-msg (once per clone)
+
+uv run pytest                        # run all tests with coverage
+uv run pytest tests/cli/             # run a single test directory
+uv run pytest -k test_version        # run a single test by name
+
+uv run ruff check                    # lint (src/ and tests/)
+uv run ruff check --fix              # lint with auto-fix
+uv run ruff format                   # format
+uv run mypy                          # type-check (strict, src/ and tests/)
+
+uv run lacuna --help                 # run the CLI
+
+uvx git-cliff --bumped-version       # preview the next release version (needs `git fetch --tags`)
+uvx git-cliff --unreleased --strip header   # preview its release notes
+```
+
+`.envrc` (direnv, optional) loads `.env` and puts `.venv/bin` on `PATH`, so the commands
+above also work without `uv run`. Write commands in docs with `uv run`, which works in
+every shell, including CI and agent shells.
+
+## Project structure
+
+`src/lacuna/` follows a layered structure:
+
+- **`config.py`** — frozen `Settings` (pydantic-settings, `LACUNA_` env prefix). Calls `load_dotenv()` at import time.
+- **`cli/app.py`** — Typer CLI. Sub-command groups live in separate files (e.g. `cli/foo.py`) and are registered via `app.add_typer(...)`.
+
+Logging is configured once in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. Set `LACUNA_LOG_LEVEL=DEBUG` to see debug output.
+
+`docs/decisions.md` is the decision log (see below); `docs/changes/` holds dated historical
+records such as the initial build prompt.
+
+## Commit Message Convention
+
+This project follows **Conventional Commits** (https://www.conventionalcommits.org).
+All commits generated or suggested by Claude must conform to this spec.
+
+### Format
+<type>[optional scope]: <description>
+[optional body]
+[optional footer(s)]
+
+### Allowed types
+
+- feat, fix, docs, style, refactor, perf, test, devops, chore
+
+This list is the source of truth. The same list is repeated in `.pre-commit-config.yaml`
+(the commit-msg hook), `cliff.toml` (release-note groups), `.github/copilot-instructions.md`
+and `README.md`; change them together.
+
+### Scopes for this project (pick the closest match)
+
+- TODO: e.g. backend, frontend, database
+
+### Rules
+
+1. Subject line ≤ 72 characters, lowercase, no trailing period.
+2. Use imperative mood: "add feature" not "added feature".
+3. Breaking changes: append `!` to the type OR add a `BREAKING CHANGE:` footer.
+4. Never squash unrelated changes into one commit — split them.
+
+Pull requests are squash-merged, so a PR's title becomes its commit on `main` and its line
+in the release notes: make it a Conventional Commit that reads well to a user.
+
+## Branch naming
+
+Before the first commit of a task, create a branch named `<type>/<short-kebab-description>`, where `<type>` is the Conventional Commits type of the main change (e.g. `feat/export-csv`, `fix/retry-timeout`, `docs/setup-guide`). Keep it under ~40 characters, lowercase, no ticket numbers unless the user gives one. Never commit directly to `main`.
+
+Minor fixes and improvements to the agent rules (`CLAUDE.md`, `.claude/`) made while working on a task can go into that task's branch and pull request, in a commit of their own (`docs: ...`), instead of a separate branch. A larger change to how the agent works gets its own branch.
+
+Claude Code cloud sessions start on an auto-generated `ccr-*` branch, and the session's own instructions say to develop and push there. In this repository that branch is always replaced by a named one: before the first commit, create the `<type>/<short-kebab-description>` branch from it, and when the user asks to push, push that branch, never the `ccr-*` one. The user's request to push is permission to push the named branch in its place. If the work was already committed on the `ccr-*` branch, create the named branch at that commit before pushing (the commits come with it).
+
+Never push to the remote (`git push`, or anything that pushes for you, such as creating a pull request from local commits) unless the user asks for it in this session or a skill they ran says to, as `/done` does. A request to push covers that one push, not later commits: commit locally and ask before pushing again. "Merge main into this branch", "commit" or "fix the conflicts" are not requests to push.
+
+`/done` (`.claude/skills/done/SKILL.md`) ships the work in the working tree in one go: branch, commit, push, pull request, wait for CI, squash-merge. It runs only when the user types it, and typing it is the approval to create the branch and merge that pull request.
+
+## Session naming
+
+In a Claude Code cloud session started from an issue or a link, rename the session to a short readable description of the work (e.g. "Add CSV export"), not the issue number or the URL. Do it once the task is understood.
+
+## Key conventions and guidelines
+
+- Dependency injection: pass config explicitly to any client/service — never read the global `SETTINGS` inside library code. Only the CLI commands (and, in an app, the module-level instance built by its factory) read `SETTINGS`; tests build their own `Settings`.
+- Settings: give every field a docstring saying what it is and what leaving it unset does; type secrets as `SecretStr` so they never show up in logs or reprs.
+- External services: every client of an outside API takes its `httpx` client or transport as a parameter. Tests never call the real service: they pass an `httpx.MockTransport`.
+- mypy is strict. All functions including tests need return type annotations.
+- Git hooks (pre-commit) run ruff (fix + format) and mypy on every commit, and check the commit message.
+- CLI lazy imports: in `cli/app.py` and the group modules (`cli/<group>.py`), `lacuna.*` imports must be inside the command function body, not at module level (the group modules themselves, `lacuna.cli.*`, are the exception). `typer`, `rich`, and stdlib belong at the top of the file. This keeps `--help` fast and isolates heavy deps per command.
+- CLI commands that delete or overwrite data ask for confirmation first, with a `--yes` option to skip it.
+- Releases are made by the `release.yml` workflow (manual): git-cliff works out the next version from the commits since the last `v*` tag (`feat` raises the minor number, anything else the patch number) and publishes a GitHub release with notes made from those commits, which creates the tag. Never bump a version, push a `v*` tag or write release notes by hand as part of a change. The `version` in `pyproject.toml` and `__version__` are placeholders.
+- `docs/decisions.md` is an append-only log of significant decisions, oldest first. Each entry is `## YYYY-MM-DD — <decision as a short statement>` followed by **Context**, **Decision** and **Consequences** paragraphs. Keep an entry compact: about 120 words, one to three sentences per paragraph, covering what was chosen, why, and the trade-offs someone would not guess. Leave out how it is implemented (file names, endpoints, flags, steps); that belongs in the code and the other docs. When you make a significant decision, add an entry in the same change: a new dependency, a change to a data format, API or stored data, a deviation from these conventions, or any hard-to-reverse choice the next person would wonder about. Minor choices belong in the PR description. Never edit past entries; to change a decision, add a new entry that names the one it replaces. This file (`CLAUDE.md`) is the source of truth for current rules; the log explains why.
+- `docs/changes/` holds dated historical records (plans, build prompts), not current instructions. Do not read them unless the user asks; `CLAUDE.md` and `README.md` are the source of truth.
+- Scratch files (drafts, generated options) go in `/temp/`, which is gitignored.
+- **After every significant change** — new CLI command, new data pipeline, new dependency, changed directory layout — update `CLAUDE.md` (architecture / conventions) and `README.md` (user-facing instructions, dev setup, release process). Keep them in sync with the actual codebase.

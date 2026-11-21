@@ -1,0 +1,36 @@
+name: Feature request
+description: A change described well enough to hand to someone (or an agent) for implementation.
+labels: [feature]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who needs this and why. Describe the need, not the implementation.
+      placeholder: As a …, I want …, so that …
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Testable checks that say when this is done. Given/When/Then is welcome.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: Related things this issue should not change.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Related issues or PRs, decisions already made, sketches or screenshots.
+  - type: textarea
+    id: verification
+    attributes:
+      label: How to verify
+      description: Tests to add, an e2e flow, or manual steps that prove it works.

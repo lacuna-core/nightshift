@@ -1,0 +1,23 @@
+name: Bug report
+description: Something that does not work as it should, described well enough to reproduce and fix.
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+      placeholder: When I …, the app …, but it should …
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Screenshots or a recording, error messages and logs, related issues or PRs. Remove anything private first.
+  - type: textarea
+    id: version
+    attributes:
+      label: Version
+      description: The version of the app where the bug was found.
+
