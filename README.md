@@ -1,23 +1,11 @@
-# lacuna
+# nightshift
 
-TODO: one-sentence project description.
-
-## Bootstrap
-
-```bash
-gh repo create <your-project-name> --template lacuna-core/lacuna_template --public --clone
-cd <your-project-name>
-bash shell/bootstrap.sh <your-project-name>
-```
-
-Then fill in the `TODO`s: the description here and in `pyproject.toml`, and the intro
-paragraph and commit scopes in `CLAUDE.md`. Put the build prompt, if there is one, in
-`docs/changes/`.
+Personal dark factory
 
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) — Python package manager
-- [direnv](https://direnv.net/) — optional, loads `.env` and the virtualenv's tools when
+- [direnv](https://direnv.net/) — loads `.env` and the virtualenv's tools when
   you `cd` into the repo (`direnv allow` once)
 
 ## Install
@@ -39,12 +27,12 @@ cp .env.example .env
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LACUNA_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `NIGHTSHIFT_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ## Usage
 
 ```bash
-uv run lacuna --help
+uv run nightshift --help
 ```
 
 ## Development
@@ -67,9 +55,9 @@ uv run mypy               # strict type-check
 
 ### Project structure
 
-`src/lacuna/` is layered:
+`src/nightshift/` is layered:
 
-- **`config.py`** — pydantic-settings with `LACUNA_` env prefix
+- **`config.py`** — pydantic-settings with `NIGHTSHIFT_` env prefix
 - **`cli/app.py`** — Typer CLI; add sub-commands as `cli/<name>.py` and register via `app.add_typer(...)`
 
 Docs:
@@ -124,5 +112,5 @@ uvx git-cliff --unreleased --strip header
 
 To go to 1.0, or to pick any version by hand, tag the commit yourself
 (`git tag v1.0.0 <commit> && git push origin v1.0.0`); later versions count from that
-tag. The `version` in `pyproject.toml` and `lacuna version` are placeholders and stay as
+tag. The `version` in `pyproject.toml` and `nightshift version` are placeholders and stay as
 they are.

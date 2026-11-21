@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-TODO: one paragraph on what Lacuna is and does, for whoever (or whatever) opens this repo
+TODO: one paragraph on what Nightshift is and does, for whoever (or whatever) opens this repo
 first: the problem it solves, who uses it, and its main moving parts.
 
 ## Commands
@@ -18,7 +18,7 @@ uv run ruff check --fix              # lint with auto-fix
 uv run ruff format                   # format
 uv run mypy                          # type-check (strict, src/ and tests/)
 
-uv run lacuna --help                 # run the CLI
+uv run nightshift --help                 # run the CLI
 
 uvx git-cliff --bumped-version       # preview the next release version (needs `git fetch --tags`)
 uvx git-cliff --unreleased --strip header   # preview its release notes
@@ -30,12 +30,12 @@ every shell, including CI and agent shells.
 
 ## Project structure
 
-`src/lacuna/` follows a layered structure:
+`src/nightshift/` follows a layered structure:
 
-- **`config.py`** — frozen `Settings` (pydantic-settings, `LACUNA_` env prefix). Calls `load_dotenv()` at import time.
+- **`config.py`** — frozen `Settings` (pydantic-settings, `NIGHTSHIFT_` env prefix). Calls `load_dotenv()` at import time.
 - **`cli/app.py`** — Typer CLI. Sub-command groups live in separate files (e.g. `cli/foo.py`) and are registered via `app.add_typer(...)`.
 
-Logging is configured once in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. Set `LACUNA_LOG_LEVEL=DEBUG` to see debug output.
+Logging is configured once in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
 
 `docs/decisions.md` is the decision log (see below); `docs/changes/` holds dated historical
 records such as the initial build prompt.
@@ -95,7 +95,7 @@ In a Claude Code cloud session started from an issue or a link, rename the sessi
 - External services: every client of an outside API takes its `httpx` client or transport as a parameter. Tests never call the real service: they pass an `httpx.MockTransport`.
 - mypy is strict. All functions including tests need return type annotations.
 - Git hooks (pre-commit) run ruff (fix + format) and mypy on every commit, and check the commit message.
-- CLI lazy imports: in `cli/app.py` and the group modules (`cli/<group>.py`), `lacuna.*` imports must be inside the command function body, not at module level (the group modules themselves, `lacuna.cli.*`, are the exception). `typer`, `rich`, and stdlib belong at the top of the file. This keeps `--help` fast and isolates heavy deps per command.
+- CLI lazy imports: in `cli/app.py` and the group modules (`cli/<group>.py`), `nightshift.*` imports must be inside the command function body, not at module level (the group modules themselves, `nightshift.cli.*`, are the exception). `typer`, `rich`, and stdlib belong at the top of the file. This keeps `--help` fast and isolates heavy deps per command.
 - CLI commands that delete or overwrite data ask for confirmation first, with a `--yes` option to skip it.
 - Releases are made by the `release.yml` workflow (manual): git-cliff works out the next version from the commits since the last `v*` tag (`feat` raises the minor number, anything else the patch number) and publishes a GitHub release with notes made from those commits, which creates the tag. Never bump a version, push a `v*` tag or write release notes by hand as part of a change. The `version` in `pyproject.toml` and `__version__` are placeholders.
 - `docs/decisions.md` is an append-only log of significant decisions, oldest first. Each entry is `## YYYY-MM-DD — <decision as a short statement>` followed by **Context**, **Decision** and **Consequences** paragraphs. Keep an entry compact: about 120 words, one to three sentences per paragraph, covering what was chosen, why, and the trade-offs someone would not guess. Leave out how it is implemented (file names, endpoints, flags, steps); that belongs in the code and the other docs. When you make a significant decision, add an entry in the same change: a new dependency, a change to a data format, API or stored data, a deviation from these conventions, or any hard-to-reverse choice the next person would wonder about. Minor choices belong in the PR description. Never edit past entries; to change a decision, add a new entry that names the one it replaces. This file (`CLAUDE.md`) is the source of truth for current rules; the log explains why.

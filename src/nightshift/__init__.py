@@ -5,7 +5,7 @@ from loguru import logger
 
 load_dotenv()
 
-from lacuna.config import SETTINGS
+from nightshift.config import SETTINGS
 
 # The package version, a placeholder that is never bumped. Releases are numbered by the
 # Release workflow, from git tags (see "Releases" in README.md).
@@ -16,6 +16,6 @@ logger.add(sys.stderr, level=SETTINGS.log_level.upper(), colorize=True)
 
 
 def main() -> None:
-    from lacuna.cli.app import app
+    from nightshift.cli.app import app
 
     app()
