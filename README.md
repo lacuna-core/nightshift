@@ -63,7 +63,6 @@ uv run mypy               # strict type-check
 Docs:
 
 - **`docs/decisions.md`** — append-only log of significant decisions and why they were made
-- **`docs/changes/`** — dated historical records (build prompts, plans)
 
 See `CLAUDE.md` for coding conventions. `AGENTS.md` points other coding agents to it.
 
