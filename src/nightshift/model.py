@@ -238,6 +238,8 @@ class Limit:
     """A usage limit that stopped an agent."""
 
     resets_at: datetime | None
+    at: datetime
+    """When it stopped the agent."""
 
 
 @dataclass(frozen=True)
@@ -412,6 +414,26 @@ class CleanUp:
 
 
 @dataclass(frozen=True)
+class SetLimit:
+    """Stop picking until the limit resets, or note that it is being probed."""
+
+    limit: UsageLimit
+    new: bool
+
+
+@dataclass(frozen=True)
+class ClearLimit:
+    """The usage limit is over."""
+
+
+@dataclass(frozen=True)
+class Continue:
+    """Tell an agent that a usage limit stopped to go on."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
 class GoOn:
     """The agent that needed you works again."""
 
@@ -478,6 +500,9 @@ Action = (
     | TakeOver
     | Reset
     | CleanUp
+    | SetLimit
+    | ClearLimit
+    | Continue
     | GoOn
     | Interrupt
     | GiveUpStopping

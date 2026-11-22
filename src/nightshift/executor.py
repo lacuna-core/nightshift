@@ -43,7 +43,9 @@ from nightshift.model import (
     Brief,
     Claim,
     CleanUp,
+    ClearLimit,
     Complete,
+    Continue,
     Drop,
     End,
     Finish,
@@ -52,6 +54,7 @@ from nightshift.model import (
     GoOn,
     Interrupt,
     Item,
+    Limit,
     NameTab,
     Pick,
     Pr,
@@ -63,10 +66,12 @@ from nightshift.model import (
     Run,
     RunState,
     RunView,
+    SetLimit,
     TakeOver,
     TicketFacts,
     Unflag,
     Update,
+    UsageLimit,
     Wait,
 )
 from nightshift.observe import RepoState
@@ -75,6 +80,7 @@ from nightshift.store import DuplicateRunError, Store
 
 Effect = dict[str, str]
 REPORT_ONLY_KEY = "report-only-until"
+LIMIT_KEY = "usage-limit"
 REMOVING = "it is being removed"
 
 
@@ -89,6 +95,10 @@ class WriteTracker(Protocol):
     def brief(self, run: Run) -> Brief: ...
     def close_pr(self, pr_ref: str) -> None: ...
     def pr_commits(self, pr_ref: str) -> frozenset[str]: ...
+
+
+class ReadLimits(Protocol):
+    def limit(self, session_id: str) -> Limit | None: ...
 
 
 class Notifier(Protocol):
@@ -119,6 +129,7 @@ class Executor:
         tracker: WriteTracker,
         herdr: Herdr,
         git: Git,
+        claude: ReadLimits,
         cleanup: Cleanup,
         notifier: Notifier,
         paths: Paths,
@@ -130,6 +141,7 @@ class Executor:
         self._tracker = tracker
         self._herdr = herdr
         self._git = git
+        self._claude = claude
         self._cleanup = cleanup
         self._notifier = notifier
         self._paths = paths
@@ -182,6 +194,13 @@ class Executor:
                 self._reset(run)
             case CleanUp(run, merged):
                 self._clean_up(run, merged)
+            case SetLimit(limit, new):
+                self._set_limit(limit, new)
+            case ClearLimit():
+                logger.info("the usage limit is over")
+                self._store.remove(LIMIT_KEY)
+            case Continue(run):
+                self._continue(run)
             case GoOn(run):
                 self._go_on(run)
             case Interrupt(run):
@@ -669,6 +688,38 @@ class Executor:
         told = reason is Reason.DISCARDED and run.kept_reason not in (None, REMOVING)
         effects = [] if told else [comment("kept", text)]
         self._to(run, run.state, *effects, kept_reason=why)
+
+    # --- usage limits -----------------------------------------------------------------
+
+    def _set_limit(self, limit: UsageLimit, new: bool) -> None:
+        self._store.put(
+            LIMIT_KEY,
+            {
+                "since": limit.since.isoformat(),
+                "resets_at": limit.resets_at.isoformat() if limit.resets_at else None,
+                "probed_at": limit.probed_at.isoformat() if limit.probed_at else None,
+            },
+        )
+        if new:
+            at = limit.resets_at.astimezone().strftime("%H:%M") if limit.resets_at else None
+            text = f"It resets at {at}." if at else "It is not known when it resets."
+            logger.info("usage limit: no new tickets are picked. {}", text)
+            self._notifier.send("Nightshift: usage limit", text)
+
+    def _continue(self, run: Run) -> None:
+        run = self._fresh(run)
+        terminal = self._herdr.run_terminal(run.id)
+        if not run.live or terminal is None or not terminal.has_claude:
+            return
+        if self._limit(run) is None or terminal.state is AgentState.WORKING:
+            return  # you continued it yourself
+        logger.info("the usage limit is over for this agent: continuing")
+        if terminal.state is AgentState.BLOCKED:
+            self._herdr.interrupt(terminal.address)  # close the limit's own menu
+        self._herdr.send(terminal.address, "continue")
+
+    def _limit(self, run: Run) -> Limit | None:
+        return self._claude.limit(run.claude_session_id or "")
 
     # --- handing over -----------------------------------------------------------------
 

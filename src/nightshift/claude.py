@@ -1,15 +1,18 @@
 """Claude Code: the ``claude`` CLI, its settings and its transcripts."""
 
 import json
+import os
 import shlex
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from nightshift.errors import ToolError
-from nightshift.model import Brief
+from nightshift.model import Brief, Limit
 from nightshift.proc import Runner
 
 PERMISSION_MODE = "acceptEdits"
+_TAIL = 512 * 1024
 _MAX_TEXT = 20_000
 _MAX_COMMENTS = 20
 NEEDED_TOOLS = ("git commit", "git push", "gh pr create")
@@ -44,6 +47,23 @@ class Claude:
     def runs_in(self, worktree: Path) -> bool:
         return bool(self.processes_in(worktree))
 
+    def limit(self, session_id: str) -> Limit | None:
+        """The usage limit that stopped a session, if it did and nothing came after.
+
+        The transcript is Claude Code's own and not documented, so anything unexpected counts
+        as no limit.
+        """
+        for path in (self._home / ".claude" / "projects").glob(f"*/{session_id}.jsonl"):
+            try:
+                with path.open("rb") as file:
+                    file.seek(0, os.SEEK_END)
+                    file.seek(max(file.tell() - _TAIL, 0))
+                    lines = file.read().decode(errors="replace").splitlines()
+            except OSError:
+                continue
+            return _last_limit(lines)
+        return None
+
     def trusts(self, clone: Path) -> bool | None:
         """Was the trust dialog accepted for this folder? None if that cannot be told.
 
@@ -71,6 +91,38 @@ class Claude:
             rules = permissions.get("allow") if isinstance(permissions, dict) else None
             allowed += [r for r in rules if isinstance(r, str)] if isinstance(rules, list) else []
         return [tool for tool in NEEDED_TOOLS if not any(_allows(r, tool) for r in allowed)]
+
+
+def _last_limit(lines: list[str]) -> Limit | None:
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") not in ("user", "assistant"):
+            continue
+        if entry.get("isSidechain") or entry.get("isMeta"):
+            continue
+        if not entry.get("isApiErrorMessage") or entry.get("apiError") != "usage_limit_reached":
+            return None
+        return _limit(entry)
+    return None
+
+
+def _limit(entry: dict[str, Any]) -> Limit:
+    try:
+        at = datetime.fromisoformat(entry["timestamp"])
+    except KeyError, TypeError, ValueError:
+        at = datetime.fromtimestamp(0, UTC)
+    quota = entry.get("quotaLimits")
+    seconds = quota.get("resetsAt") if isinstance(quota, dict) else None
+    try:
+        resets_at = None if seconds is None else datetime.fromtimestamp(float(seconds), UTC)
+    except TypeError, ValueError, OverflowError, OSError:
+        resets_at = None
+    if resets_at is not None and resets_at <= at:
+        resets_at = None  # it said so after the reset, so it is not the real one
+    return Limit(resets_at, at)
 
 
 def start_args(session_id: str, prompt: str) -> list[str]:

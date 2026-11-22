@@ -5,6 +5,7 @@ before it writes. Nothing here does I/O.
 """
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -16,8 +17,11 @@ from nightshift.conventions import (
     IN_PROGRESS,
     IN_REVIEW,
     LABEL,
+    LIMIT_GRACE,
+    LIMIT_RETRY,
     NEEDS_HUMAN,
     NO_STATE_NEEDS_YOU,
+    POLL_INTERVAL,
     TODO,
     TODO_POLLS,
 )
@@ -27,7 +31,9 @@ from nightshift.model import (
     AgentState,
     Claim,
     CleanUp,
+    ClearLimit,
     Complete,
+    Continue,
     Drop,
     End,
     Finish,
@@ -45,10 +51,12 @@ from nightshift.model import (
     Resume,
     RunState,
     RunView,
+    SetLimit,
     Snapshot,
     TakeOver,
     Unflag,
     Update,
+    UsageLimit,
     Wait,
 )
 
@@ -61,6 +69,7 @@ def decide(snapshot: Snapshot) -> list[Action]:
     for view in snapshot.runs:
         actions += _run(view, snapshot)
     actions += _flags(snapshot)
+    actions += _limits(snapshot)
     actions += _picks(snapshot)
     return actions
 
@@ -109,6 +118,10 @@ def _seen(view: RunView, now: datetime) -> dict[str, Any]:
     if run.state is RunState.RUNNING and view.agent.place is AgentPlace.ALIVE:
         if view.agent.limit is None and int(view.elapsed):
             changes["active_seconds"] = run.active_seconds + int(view.elapsed)
+        if view.agent.limit is not None and run.limited_since is None:
+            changes["limited_since"] = view.agent.limit.at
+        elif view.agent.limit is None and run.limited_since is not None and _going(view):
+            changes["limited_since"] = None
         if view.active:
             changes["last_activity_at"] = now
     return changes
@@ -245,6 +258,8 @@ def _alive(view: RunView) -> Iterator[Action]:
     """Does the agent need you (FR-10), or has it failed (FR-11)?"""
     run, agent, streaks = view.run, view.agent, view.streaks
     if agent.limit is not None:
+        if run.state is RunState.WAITING:
+            yield GoOn(run)  # it waits for the limit, not for you
         return
     if run.state is RunState.WAITING:
         if agent.state is AgentState.WORKING:
@@ -461,9 +476,102 @@ def _flags(snapshot: Snapshot) -> Iterator[Action]:
             yield Unflag(key)
 
 
+# --- usage limits (FR-17) -----------------------------------------------------------------
+
+
+def _going(view: RunView) -> bool:
+    """Does the agent get answers again?"""
+    states = (AgentState.WORKING, AgentState.IDLE, AgentState.DONE, AgentState.BLOCKED)
+    return view.agent.place is AgentPlace.ALIVE and view.agent.state in states
+
+
+def _limited(snapshot: Snapshot) -> list[RunView]:
+    return [
+        v
+        for v in snapshot.runs
+        if v.run.state in (RunState.RUNNING, RunState.WAITING)
+        and v.agent.place is AgentPlace.ALIVE
+        and v.agent.limit is not None
+        and v.ticket is not None
+    ]
+
+
+def _limits(snapshot: Snapshot) -> Iterator[Action]:
+    now, limit, limited = snapshot.now, snapshot.usage_limit, _limited(snapshot)
+    resets = [v.agent.limit.resets_at for v in limited if v.agent.limit]
+    coming = max((r for r in resets if r is not None and _ahead(r, now)), default=None)
+    if limit is None:
+        if coming is not None or None in resets:
+            yield SetLimit(UsageLimit(now, coming), new=True)
+        else:
+            yield from (Continue(v.run) for v in limited)
+    elif coming is not None and (limit.resets_at is None or coming > limit.resets_at):
+        yield SetLimit(replace(limit, resets_at=coming), new=False)
+    elif limit.resets_at is not None:
+        if not _ahead(limit.resets_at, now):
+            yield ClearLimit()
+            yield from (Continue(v.run) for v in limited if v.agent.limit)
+    elif _recovered(limit, snapshot):
+        yield ClearLimit()
+        yield from (Continue(v.run) for v in limited)
+    elif _probe_due(limit, now) and limited:
+        yield SetLimit(replace(limit, probed_at=now), new=False)
+        yield Continue(limited[0].run)
+
+
+def _ahead(resets_at: datetime, now: datetime) -> bool:
+    return resets_at + LIMIT_GRACE > now
+
+
+def _probe_due(limit: UsageLimit, now: datetime) -> bool:
+    return now - (limit.probed_at or limit.since) >= LIMIT_RETRY
+
+
+def _recovered(limit: UsageLimit, snapshot: Snapshot) -> bool:
+    """Does an agent work that was stopped before, or that was started as a probe?"""
+    for view in snapshot.runs:
+        if not view.run.live or view.agent.limit is not None or not _going(view):
+            continue
+        if view.run.limited_since is not None:
+            return True
+        started = view.run.started_at
+        if (
+            limit.probed_at is not None
+            and started is not None
+            and started >= limit.probed_at
+            and snapshot.now - started >= POLL_INTERVAL
+        ):
+            return True
+    return False
+
+
 def _picks(snapshot: Snapshot) -> Iterator[Action]:
     if not snapshot.ready:
         return
+    limit = snapshot.usage_limit
+    limited = _limited(snapshot)
+    if limit is not None or any(_still_stopped(v, snapshot.now) for v in limited):
+        probing = (
+            limit is not None
+            and limit.resets_at is None
+            and not limited
+            and _probe_due(limit, snapshot.now)
+        )
+        if probing and limit is not None:
+            for pick in _free_picks(snapshot):
+                yield SetLimit(replace(limit, probed_at=snapshot.now), new=False)
+                yield replace(pick, free=1)
+                return
+        return
+    yield from _free_picks(snapshot)
+
+
+def _still_stopped(view: RunView, now: datetime) -> bool:
+    limit = view.agent.limit
+    return limit is not None and (limit.resets_at is None or _ahead(limit.resets_at, now))
+
+
+def _free_picks(snapshot: Snapshot) -> Iterator[Pick]:
     for board in snapshot.boards:
         if board.problem is not None or board.url not in snapshot.limits:
             continue

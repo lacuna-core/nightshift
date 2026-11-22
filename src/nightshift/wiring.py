@@ -91,6 +91,7 @@ def build_loop(
         tracker=boundaries.tracker,
         herdr=boundaries.herdr,
         git=boundaries.git,
+        claude=boundaries.claude,
         cleanup=Cleanup(boundaries.herdr, boundaries.claude, boundaries.git),
         notifier=boundaries.notifier,
         paths=paths,

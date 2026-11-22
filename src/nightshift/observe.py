@@ -26,6 +26,7 @@ from nightshift.model import (
     AgentPlace,
     AgentState,
     Board,
+    Limit,
     Presence,
     RepoInfo,
     Run,
@@ -34,6 +35,7 @@ from nightshift.model import (
     Snapshot,
     Streaks,
     TicketFacts,
+    UsageLimit,
 )
 from nightshift.project_config import ProjectConfig, RepoConfig
 from nightshift.store import Store
@@ -55,6 +57,7 @@ class ReadTracker(Protocol):
 class ReadClaude(Protocol):
     def version(self) -> str: ...
     def runs_in(self, worktree: Path) -> bool: ...
+    def limit(self, session_id: str) -> Limit | None: ...
 
 
 @dataclass
@@ -153,9 +156,20 @@ class Observer:
             runs=views,
             limits={b.url: b.max_parallel_agents for b in self._config.boards},
             listed=listed,
+            usage_limit=self._usage_limit(),
             ready=herdr_ok and claude_ok,
             signalled=frozenset(key.removeprefix("flag:") for key in self._store.items("flag:")),
         )
+
+    def _usage_limit(self) -> UsageLimit | None:
+        stored = self._store.get("usage-limit")
+        if not stored:
+            return None
+        since, resets_at, probed_at = (
+            datetime.fromisoformat(stored[k]) if stored[k] else None
+            for k in ("since", "resets_at", "probed_at")
+        )
+        return UsageLimit(since or self._now(), resets_at, probed_at)
 
     # --- what concerns everything -----------------------------------------------------
 
@@ -296,6 +310,8 @@ class Observer:
             agent = terminal.agent()
             if agent.place is AgentPlace.LOST:
                 agent = replace(agent, other_claude=self._other_claude(run))
+            if agent.place is AgentPlace.ALIVE and agent.state is not AgentState.WORKING:
+                agent = replace(agent, limit=self._claude.limit(run.claude_session_id))
             screen = ""
             if agent.place is AgentPlace.ALIVE and agent.state is AgentState.WORKING:
                 screen = screen_signature(self._herdr.screen(terminal.address))

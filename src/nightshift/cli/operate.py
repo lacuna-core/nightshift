@@ -171,6 +171,13 @@ def _status(store: Store, config: ProjectConfig) -> None:
         used = sum(r.live and r.board_url == board.url for r in runs)
         free = max(board.max_parallel_agents - used, 0)
         console.print(f"Board      {board.url}: {free} of {board.max_parallel_agents} slots free")
+    if limit := store.get("usage-limit"):
+        until = (
+            f"until {limit['resets_at'][:16].replace('T', ' ')} UTC"
+            if limit["resets_at"]
+            else "reset time unknown"
+        )
+        console.print(f"[yellow]Usage limit[/] no new tickets are picked, {until}")
     for name, text in report.get("problems", {}).items():
         console.print(f"[red]Problem[/]    {escape(name)}: {escape(text)}")
     for ticket in report.get("unlisted", []):

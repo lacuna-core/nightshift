@@ -441,7 +441,7 @@ class World:
         )  # fmt: skip
         self.executor = Executor(
             store=self.store, tracker=self.tracker, herdr=Herdr(self.hc), git=self.git,
-            cleanup=Cleanup(Herdr(self.hc), self._claude(), self.git), notifier=self.notifier, paths=self.paths, repos=self.observer.repo,
+            claude=self._claude(), cleanup=Cleanup(Herdr(self.hc), self._claude(), self.git), notifier=self.notifier, paths=self.paths, repos=self.observer.repo,
             now=lambda: self.clock, sleep=lambda seconds: None,
         )  # fmt: skip
         self.loop = Loop(
@@ -489,6 +489,35 @@ class World:
 
     def agent(self, state: str, number: int = 42, kind: str | None = None) -> None:
         self.hc.set_state(self.terminal(number), state, kind)
+
+    def limit(self, resets: timedelta | None, number: int = 42) -> None:
+        """A usage limit stops the agent."""
+        self._transcript(
+            number,
+            {
+                "type": "assistant",
+                "timestamp": self.clock.isoformat(),
+                "isApiErrorMessage": True,
+                "apiError": "usage_limit_reached",
+                "quotaLimits": {"resetsAt": int((self.clock + resets).timestamp())}
+                if resets is not None
+                else {},
+            },
+            {"type": "system", "subtype": "informational"},
+        )
+        self.agent("error", number)
+
+    def unlimit(self, number: int = 42) -> None:
+        """The agent gets answers again."""
+        self._transcript(number, {"type": "user", "timestamp": self.clock.isoformat()})
+        self.agent("working", number)
+
+    def _transcript(self, number: int, *entries: dict[str, Any]) -> None:
+        session = self.run(number).claude_session_id
+        path = self.tmp / "home" / ".claude" / "projects" / "-wt" / f"{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as file:
+            file.writelines(json.dumps(e) + "\n" for e in entries)
 
     def open_pr(self, issue: Issue, *, draft: bool = False, ref: str = "PR_1") -> Pr:
         """The agent commits, pushes and opens its PR."""
