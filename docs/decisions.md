@@ -50,3 +50,18 @@ a placeholder.
 **Consequences:** Nothing to bump or tag by hand, and release notes come for free from
 squash-merged PR titles. The installed package does not know its release number. Going
 to 1.0 takes a hand-made tag.
+
+## 2026-11-21 — Branches are named after their issue
+
+**Context:** Nightshift creates branches before its agent has seen the code, so it cannot
+know the Conventional Commits type of the change that a `<type>/<description>` name needs.
+A name that depends on guessing the type is unreliable, and human and agent work should
+share one convention.
+
+**Decision:** Every branch is `<issue-num>/<short-kebab-description>`, for agents and
+people alike, and every branch belongs to a GitHub issue. The change type stays in the
+commit messages and the PR title, where release notes read it.
+
+**Consequences:** Branch names are unique, link straight to their ticket and need no
+guessing. Work without an issue now needs one created first, which adds a small step to
+quick fixes. Branch names no longer show the kind of change at a glance.

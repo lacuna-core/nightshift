@@ -27,7 +27,9 @@ read the diff if the changes were not made in this conversation.
 
 ## 2. Branch
 
-Follow "Branch naming" in `CLAUDE.md`: `<type>/<short-kebab-description>`.
+Follow "Branch naming" in `CLAUDE.md`: `<issue-num>/<short-kebab-description>`. Use the
+issue named in this conversation or in `$ARGUMENTS`; if there is none, stop and ask the
+user for the issue number.
 
 - On `main`, or on an auto-generated branch such as `ccr-*`: create the named branch from
   the current state (`git switch -c ...`). Uncommitted changes come along.
@@ -58,7 +60,7 @@ git push -u origin HEAD
 
 If the branch has no open pull request, create one against `main` with `gh pr create`.
 The title is a Conventional Commits subject (it becomes the squash commit on `main`). The
-body says what changed and why, how it was tested, and anything a release or deploy
+body starts with `Closes #<issue-num>`, then says what changed and why, how it was tested, and anything a release or deploy
 needs (a migration, a new setting, a command to run). If one is already open, update its title and
 body when the new commits change what it does.
 

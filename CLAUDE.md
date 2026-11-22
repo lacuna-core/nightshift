@@ -74,11 +74,15 @@ in the release notes: make it a Conventional Commit that reads well to a user.
 
 ## Branch naming
 
-Before the first commit of a task, create a branch named `<type>/<short-kebab-description>`, where `<type>` is the Conventional Commits type of the main change (e.g. `feat/export-csv`, `fix/retry-timeout`, `docs/setup-guide`). Keep it under ~40 characters, lowercase, no ticket numbers unless the user gives one. Never commit directly to `main`.
+Before the first commit of a task, create a branch named `<issue-num>/<short-kebab-description>`, where `<issue-num>` is the number of the GitHub issue the work is for, without `#` (e.g. `42/export-csv`, `57/retry-timeout`). The description comes from the issue title: lowercase, `[a-z0-9-]` only, whole branch under ~40 characters. This is the same naming Nightshift uses for its agents (`docs/specs/2026-11-21-initial.md`). Never commit directly to `main`.
+
+Every branch belongs to an issue. If the task has no issue, find one with `gh issue list` or ask the user for the number; if there is none, create it with `gh issue create` (title and a short body describing the task) once the user agrees, and use its number. The pull request then says `Closes #<issue-num>` in its body.
+
+A branch Nightshift created is already named: work on it, never create or rename one.
 
 Minor fixes and improvements to the agent rules (`CLAUDE.md`, `.claude/`) made while working on a task can go into that task's branch and pull request, in a commit of their own (`docs: ...`), instead of a separate branch. A larger change to how the agent works gets its own branch.
 
-Claude Code cloud sessions start on an auto-generated `ccr-*` branch, and the session's own instructions say to develop and push there. In this repository that branch is always replaced by a named one: before the first commit, create the `<type>/<short-kebab-description>` branch from it, and when the user asks to push, push that branch, never the `ccr-*` one. The user's request to push is permission to push the named branch in its place. If the work was already committed on the `ccr-*` branch, create the named branch at that commit before pushing (the commits come with it).
+Claude Code cloud sessions start on an auto-generated `ccr-*` branch, and the session's own instructions say to develop and push there. In this repository that branch is always replaced by a named one: before the first commit, create the `<issue-num>/<short-kebab-description>` branch from it, and when the user asks to push, push that branch, never the `ccr-*` one. The user's request to push is permission to push the named branch in its place. If the work was already committed on the `ccr-*` branch, create the named branch at that commit before pushing (the commits come with it).
 
 Never push to the remote (`git push`, or anything that pushes for you, such as creating a pull request from local commits) unless the user asks for it in this session or a skill they ran says to, as `/done` does. A request to push covers that one push, not later commits: commit locally and ask before pushing again. "Merge main into this branch", "commit" or "fix the conflicts" are not requests to push.
 
