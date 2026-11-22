@@ -108,3 +108,25 @@ local work, because its local effect is hard to foresee.
 **Consequences:** One board move has one meaning, a new run never inherits a bad attempt,
 and no commits or uncommitted changes are lost. Old branches, and worktrees that are not
 safe to remove, pile up until someone deals with them.
+
+## 2026-11-22 — Usage limits are read from Claude Code's transcript
+
+**Context:** Nightshift must tell an agent stopped by a usage limit from one that needs a
+person, and know when the limit resets. Herdr only shows that the agent stopped.
+
+**Decision:** Read the session's transcript, which records the limit and its reset time as
+data. Anything in it that is not understood counts as no limit.
+
+**Consequences:** No hooks and no reading of the screen. The format is Claude Code's own and
+not documented, so an update can break it; the agent is then flagged as needing a person,
+which is safe but wakes nobody up by itself.
+
+## 2026-11-22 — The config file is YAML, read with PyYAML
+
+**Context:** `nightshift.yaml` is written by a command but also edited by hand, and needs
+nested lists.
+
+**Decision:** YAML, read and written with PyYAML and validated with Pydantic.
+
+**Consequences:** The usual library, with type stubs and no surprises. It does not keep
+comments, so running `init` again drops the ones added by hand.
