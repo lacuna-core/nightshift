@@ -89,6 +89,8 @@ class FakeTracker:
             return Board(url, problem="the status In Review is missing")
         items = []
         for rank, ref in enumerate(self.ranks[url]):
+            if ref not in self.issues:
+                continue
             issue = self.issues[ref]
             status = issue.status.get(url)
             wanted = status in ("Todo", "In Progress") and "nightshift" in issue.labels

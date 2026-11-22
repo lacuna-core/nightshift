@@ -14,10 +14,12 @@ from nightshift.conventions import (
     GONE_POLLS,
     IDLE_NEEDS_YOU,
     IN_PROGRESS,
+    IN_REVIEW,
     LABEL,
     NEEDS_HUMAN,
     NO_STATE_NEEDS_YOU,
     TODO,
+    TODO_POLLS,
 )
 from nightshift.model import (
     Action,
@@ -27,6 +29,7 @@ from nightshift.model import (
     Complete,
     Drop,
     End,
+    Finish,
     Flag,
     GiveUpStopping,
     GoOn,
@@ -38,10 +41,10 @@ from nightshift.model import (
     Provision,
     PrState,
     Resume,
-    Run,
     RunState,
     RunView,
     Snapshot,
+    TakeOver,
     Unflag,
     Update,
     Wait,
@@ -71,10 +74,11 @@ def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     if changes := _seen(view, snapshot.now):
         yield Update(view.run, changes)
     if view.run.live:
-        yield from _live(view, snapshot)
+        changed = list(_changed_by_you(view))
+        yield from changed or _live(view)
     elif view.run.ended:
         yield from _stopping(view, snapshot)
-        yield from _helped(view)
+        yield from _ended(view)
 
 
 def _has_tab(view: RunView) -> bool:
@@ -103,7 +107,81 @@ def _seen(view: RunView, now: datetime) -> dict[str, Any]:
     return changes
 
 
-def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
+def _taken_over(view: RunView) -> bool:
+    ticket = view.ticket
+    assert ticket is not None
+    return view.run.taken_over or ticket.label_removed or LABEL not in ticket.labels
+
+
+def moved_to_todo(view: RunView) -> bool:
+    """Did you move the ticket back, or is this a stale answer (FR-16)?"""
+    ticket = view.ticket
+    assert ticket is not None
+    if ticket.presence is not Presence.ON or ticket.status != TODO:
+        return False
+    return view.run.seen_out_of_todo or view.streaks.todo_polls >= TODO_POLLS
+
+
+def _changed_by_you(view: RunView) -> Iterator[Action]:
+    """What you did to the ticket of a live run (FR-12). The first that applies wins."""
+    run, ticket = view.run, view.ticket
+    assert ticket is not None
+    if run.state is RunState.CLAIMED:
+        return  # the claim itself checks whether the ticket is still eligible
+    pr = ticket.pr
+    merged = pr is not None and pr.state is PrState.MERGED
+    gone = view.agent.place in GONE and view.streaks.gone_polls >= GONE_POLLS
+
+    def cancel(event: str, reason: str, *, needs_human: bool = False) -> End:
+        return End(run, RunState.CANCELLED, event, reason, needs_human=needs_human, interrupt=True)
+
+    if _taken_over(view):
+        yield cancel("taken-over", _TAKEN_OVER)
+    elif ticket.transferred:
+        yield cancel("transferred", "The issue was transferred to another repository.")
+    elif merged:
+        if finished(view) or run.state is RunState.COMPLETING:
+            yield Finish(run, "the pull request was merged")
+    elif not ticket.is_open:
+        yield cancel("closed", "The issue was closed.")
+    elif moved_to_todo(view):
+        yield cancel("todo", f"The ticket was moved back to {TODO}.")
+    elif pr is not None and pr.state is PrState.CLOSED and (finished(view) or gone):
+        yield cancel("pr-closed", "The pull request was closed without merging.", needs_human=True)
+    elif ticket.presence is Presence.REMOVED:
+        yield cancel("removed", "The ticket was removed from the board.")
+    elif ticket.presence is Presence.UNKNOWN or ticket.status in (TODO, IN_PROGRESS):
+        return
+    elif ticket.status == IN_REVIEW and pr is not None and pr.ready:
+        if run.state is not RunState.COMPLETING and finished(view):
+            yield Finish(run, f"you moved the ticket to {IN_REVIEW}")
+    else:
+        yield cancel(
+            f"moved-{_word(ticket.status)}",
+            f"The ticket was moved to {ticket.status or 'no status'}.",
+        )
+
+
+def _word(status: str | None) -> str:
+    return "".join(c if c.isalnum() else "-" for c in (status or "none").lower())
+
+
+_TAKEN_OVER = (
+    f"The `{LABEL}` label was removed, so this is yours now. Nightshift leaves the agent's tab, "
+    "the worktree, the branch and the pull request alone."
+)
+
+
+def _ended(view: RunView) -> Iterator[Action]:
+    run = view.run
+    if _taken_over(view):
+        if not run.taken_over:
+            yield TakeOver(run)
+        return
+    yield from _helped(view)
+
+
+def _live(view: RunView) -> Iterator[Action]:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     match run.state:
@@ -126,11 +204,13 @@ def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
 def claimed(view: RunView) -> Action:
     run, ticket = view.run, view.ticket
     assert ticket is not None
-    if ticket.status == IN_PROGRESS:
-        return Claim(run)  # set by the claim, before a crash
-    if reason := _not_eligible(ticket.status, ticket.labels, ticket.is_open):
+    # In Progress is where the claim itself put it, before a crash.
+    claimed_before = ticket.status == IN_PROGRESS
+    labels = ticket.labels - {NEEDS_HUMAN} if claimed_before else ticket.labels
+    status = TODO if claimed_before else ticket.status
+    if reason := _not_eligible(status, labels, ticket.is_open):
         return Drop(run, reason)
-    if ticket.presence is not Presence.ON:
+    if ticket.presence is not Presence.ON or ticket.transferred:
         return Drop(run, "the ticket is not on the board")
     return Claim(run)
 
@@ -148,16 +228,19 @@ def _alive(view: RunView) -> Iterator[Action]:
         yield Wait(run, f"waiting-{agent.turn}-{agent.state}", reason)
     elif agent.state is AgentState.WORKING and streaks.quiet_seconds > _seconds(view.stall_timeout):
         minutes = int(_seconds(view.stall_timeout) // 60)
-        yield _failed(run, f"The agent showed no activity for more than {minutes} minutes.")
+        yield _failed(view, f"The agent showed no activity for more than {minutes} minutes.")
     elif run.active_seconds > _seconds(view.max_run_time):
-        yield _failed(run, f"The run took longer than {view.max_run_time}.")
+        yield _failed(view, f"The run took longer than {view.max_run_time}.")
 
 
 def _seconds(duration: timedelta) -> float:
     return duration.total_seconds()
 
 
-def _failed(run: Run, reason: str) -> End:
+def _failed(view: RunView, reason: str) -> End:
+    run, pr = view.run, view.ticket.pr if view.ticket else None
+    if pr is not None and pr.state is PrState.MERGED:
+        return End(run, RunState.DONE, "merged", f"{reason} Its PR is merged.", interrupt=True)
     return End(run, RunState.FAILED, "failed", reason, needs_human=True, interrupt=True)
 
 
@@ -207,11 +290,9 @@ def _helped(view: RunView) -> Iterator[Action]:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     pr = ticket.pr
-    if run.state not in (RunState.FAILED, RunState.CANCELLED) or run.taken_over:
+    if run.state not in (RunState.FAILED, RunState.CANCELLED):
         return
     if ticket.presence is not Presence.ON or ticket.status != IN_PROGRESS or not ticket.is_open:
-        return
-    if LABEL not in ticket.labels or ticket.label_removed:
         return
     if pr is None or not pr.ready or not finished(view):
         return

@@ -34,7 +34,7 @@ class Loop:
     ) -> None:
         self._store = store
         self._observer = observer
-        self._executor = executor
+        self.executor = executor
         self._stop = stop
         self._now = now
         self._failures = 0
@@ -70,13 +70,13 @@ class Loop:
         return delay
 
     def _poll(self) -> None:
-        self._executor.repo_problems = {}
-        self._executor.flush_all()
+        self.executor.repo_problems = {}
+        self.executor.flush_all()
         snapshot = self._observer.observe()
         for action in decide.decide(snapshot):
             if self._stop.is_set():
                 break
-            self._executor.perform(action)
+            self.executor.perform(action)
         self._report(snapshot, "")
 
     def _report(self, snapshot: Snapshot | None, problem: str) -> None:
@@ -84,7 +84,7 @@ class Loop:
         problems: dict[str, Any] = dict(self._observer.problems)
         if problem:
             problems["GitHub"] = problem
-        for text in self._executor.repo_problems.values():
+        for text in self.executor.repo_problems.values():
             problems.setdefault(text.split(":")[0], text)
         report: dict[str, Any] = {"at": self._now().isoformat(), "problems": problems}
         if snapshot is not None:

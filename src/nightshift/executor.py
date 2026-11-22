@@ -37,6 +37,7 @@ from nightshift.model import (
     Complete,
     Drop,
     End,
+    Finish,
     Flag,
     GiveUpStopping,
     GoOn,
@@ -50,6 +51,7 @@ from nightshift.model import (
     Run,
     RunState,
     RunView,
+    TakeOver,
     TicketFacts,
     Unflag,
     Update,
@@ -154,6 +156,10 @@ class Executor:
                 self._end(action)
             case Wait(run, event, reason):
                 self._wait(self._fresh(run), event, reason)
+            case Finish(run, reason):
+                self._to(run, RunState.DONE, state_reason=reason, ended_at=self._now())
+            case TakeOver(run):
+                self._take_over(run)
             case GoOn(run):
                 self._go_on(run)
             case Interrupt(run):
@@ -437,7 +443,14 @@ class Executor:
     def _cancel(self, run: Run, end: End) -> Run:
         effects = [label(NEEDS_HUMAN)] if end.needs_human else []
         effects.append(comment(end.event, f"Nightshift stopped working on this. {end.reason}"))
-        return self._to(run, end.state, *effects, state_reason=end.reason, ended_at=self._now())
+        return self._to(
+            run,
+            end.state,
+            *effects,
+            state_reason=end.reason,
+            ended_at=self._now(),
+            taken_over=run.taken_over or end.event == "taken-over",
+        )
 
     def _agent(self, run: Run) -> Agent:
         if run.claude_session_id is None:
@@ -457,6 +470,13 @@ class Executor:
         if self._herdr.interrupt(terminal.address):
             turn = self._agent(run).turn
             self._store.update_run(run, stop_requested_at=None, turn_at_end=turn)
+
+    def _take_over(self, run: Run) -> None:
+        text = (
+            f"The `{LABEL}` label was removed, so this is yours now. Nightshift leaves the "
+            "agent's tab, the worktree, the branch and the pull request alone."
+        )
+        self._to(run, run.state, comment("taken-over", text), taken_over=True)
 
     def _give_up_stopping(self, run: Run) -> None:
         self._to(

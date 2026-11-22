@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 
 from nightshift import proc
-from nightshift.checks import Checks
+from nightshift.checks import Checks, Report
 from nightshift.claude import Claude
 from nightshift.config import Settings
 from nightshift.conventions import LABELS
@@ -17,7 +17,7 @@ from nightshift.executor import Executor
 from nightshift.git import Git
 from nightshift.herdr import Herdr
 from nightshift.loop import Loop, Stop
-from nightshift.model import RepoInfo
+from nightshift.model import End, RepoInfo, Run, RunState
 from nightshift.notify import Notifier
 from nightshift.observe import Observer
 from nightshift.project_config import Paths, ProjectConfig
@@ -111,3 +111,31 @@ def follow_clone(git: Git, store: Store, repo_ref: str, path: Path) -> None:
     git.repair(path, [Path(run.worktree_path) for run in moved if run.worktree_path])
     for run in moved:
         store.update_run(run, clone_path=str(path))
+
+
+def unlisted_runs(config: ProjectConfig, report: Report, store: Store) -> list[Run]:
+    """Runs whose board or repo is no longer in the config. A broken one counts as listed."""
+    refs = {r.info.ref for r in report.repos if r.info}
+    unknown = {r.path.resolve() for r in report.repos if r.info is None}
+    if report.unavailable:
+        unknown = {r.resolved for r in config.repos}
+    return [
+        run
+        for run in store.runs()
+        if not run.cleaned_up_at
+        and run.state is not RunState.DISCARDED
+        and (
+            config.board(run.board_url) is None
+            or (run.repo_ref not in refs and Path(run.clone_path).resolve() not in unknown)
+        )
+    ]
+
+
+def cancel_unlisted(run: Run) -> End:
+    return End(
+        run,
+        RunState.CANCELLED,
+        "unlisted",
+        "Its board or repository is no longer listed in Nightshift's config.",
+        interrupt=True,
+    )

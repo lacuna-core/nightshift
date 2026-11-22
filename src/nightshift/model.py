@@ -390,6 +390,21 @@ class Wait:
 
 
 @dataclass(frozen=True)
+class Finish:
+    """The run is done, and you moved its ticket yourself."""
+
+    run: Run
+    reason: str
+
+
+@dataclass(frozen=True)
+class TakeOver:
+    """You removed the label from the ticket of a run that has ended."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
 class GoOn:
     """The agent that needed you works again."""
 
@@ -452,6 +467,8 @@ class Unflag:
 Action = (
     End
     | Wait
+    | Finish
+    | TakeOver
     | GoOn
     | Interrupt
     | GiveUpStopping

@@ -2,6 +2,7 @@
 
 import sys
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -68,11 +69,28 @@ def start(
             console.print(escape(str(e)))
             raise typer.Exit(1) from None
 
+        unlisted = [r for r in wiring.unlisted_runs(config, report, store) if r.live]
+        if unlisted:
+            console.print("The board or repo of these live runs is no longer listed:")
+            for run in unlisted:
+                console.print(f"  {escape(run.repo)} #{run.ticket_id}  {run.board_url}")
+            if not yes and not typer.confirm(
+                "Cancel them? Their tabs, worktrees and branches are kept.", default=False
+            ):
+                console.print("Not started. List them again, or answer yes.")
+                raise typer.Exit(1)
+
         stop = threading.Event()
         for number in (signal.SIGINT, signal.SIGTERM):
             signal.signal(number, lambda *_: stop.set())
 
         loop = wiring.build_loop(boundaries, config, store, paths, stop)
+        try:
+            for run in unlisted:
+                loop.executor.perform(wiring.cancel_unlisted(run))
+        except NightshiftError as e:
+            console.print(f"The runs cannot be cancelled now: {escape(str(e))}")
+            raise typer.Exit(1) from None
         _prepare(boundaries, report, store)
         loop.run()
         store.close()
@@ -165,6 +183,24 @@ def _status(store: Store, config: ProjectConfig) -> None:
         console.print(f"\n[bold]{escape(repo)}[/]")
         for run in (r for r in shown if r.repo == repo):
             _status_run(run, store)
+    paths = {r.resolved for r in config.repos}
+    unwatched = [
+        r
+        for r in shown
+        if not r.live
+        and (config.board(r.board_url) is None or Path(r.clone_path).resolve() not in paths)
+    ]
+    if unwatched:
+        console.print("\n[bold]Not watched: their board or repo is no longer listed[/]")
+        for run in unwatched:
+            console.print(f"  {escape(run.repo)} #{run.ticket_id} {escape(run.branch or '')}")
+    waiting = [r for r in shown if r.state is RunState.WAITING]
+    if waiting:
+        console.print("\n[bold]Waiting for you[/]")
+        for run in waiting:
+            console.print(
+                f"  {escape(run.repo)} #{run.ticket_id}: {escape(run.state_reason or '')}"
+            )
     kept = [r for r in runs if r.kept_reason and not r.cleaned_up_at]
     if kept:
         console.print("\n[bold]Kept worktrees[/]")
