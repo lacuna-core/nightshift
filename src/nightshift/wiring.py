@@ -10,6 +10,7 @@ import httpx
 from nightshift import proc
 from nightshift.checks import Checks, Report
 from nightshift.claude import Claude
+from nightshift.cleanup import Cleanup
 from nightshift.config import Settings
 from nightshift.conventions import LABELS
 from nightshift.errors import ToolError, TrackerAuthError
@@ -90,6 +91,7 @@ def build_loop(
         tracker=boundaries.tracker,
         herdr=boundaries.herdr,
         git=boundaries.git,
+        cleanup=Cleanup(boundaries.herdr, boundaries.claude, boundaries.git),
         notifier=boundaries.notifier,
         paths=paths,
         repos=observer.repo,

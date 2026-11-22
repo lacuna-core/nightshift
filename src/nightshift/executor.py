@@ -15,7 +15,15 @@ from loguru import logger
 
 from nightshift import claude as claude_code
 from nightshift import decide, naming
-from nightshift.conventions import IN_PROGRESS, IN_REVIEW, LABEL, NEEDS_HUMAN
+from nightshift.cleanup import Cleanup, Reason
+from nightshift.conventions import (
+    IN_PROGRESS,
+    IN_REVIEW,
+    LABEL,
+    NEEDS_HUMAN,
+    REPORT_ONLY,
+    TODO,
+)
 from nightshift.errors import (
     GitError,
     HerdrError,
@@ -34,6 +42,7 @@ from nightshift.model import (
     AgentState,
     Brief,
     Claim,
+    CleanUp,
     Complete,
     Drop,
     End,
@@ -45,8 +54,11 @@ from nightshift.model import (
     Item,
     NameTab,
     Pick,
+    Pr,
     Presence,
     Provision,
+    PrState,
+    Reset,
     Resume,
     Run,
     RunState,
@@ -62,6 +74,8 @@ from nightshift.project_config import Paths
 from nightshift.store import DuplicateRunError, Store
 
 Effect = dict[str, str]
+REPORT_ONLY_KEY = "report-only-until"
+REMOVING = "it is being removed"
 
 
 class WriteTracker(Protocol):
@@ -73,6 +87,8 @@ class WriteTracker(Protocol):
     def remove_label(self, run_or_item: Run | Item, label: str) -> None: ...
     def comment(self, ticket_ref: str, mark: str, text: str) -> None: ...
     def brief(self, run: Run) -> Brief: ...
+    def close_pr(self, pr_ref: str) -> None: ...
+    def pr_commits(self, pr_ref: str) -> frozenset[str]: ...
 
 
 class Notifier(Protocol):
@@ -103,6 +119,7 @@ class Executor:
         tracker: WriteTracker,
         herdr: Herdr,
         git: Git,
+        cleanup: Cleanup,
         notifier: Notifier,
         paths: Paths,
         repos: Callable[[str], RepoState | None],
@@ -113,6 +130,7 @@ class Executor:
         self._tracker = tracker
         self._herdr = herdr
         self._git = git
+        self._cleanup = cleanup
         self._notifier = notifier
         self._paths = paths
         self._repos = repos
@@ -160,6 +178,10 @@ class Executor:
                 self._to(run, RunState.DONE, state_reason=reason, ended_at=self._now())
             case TakeOver(run):
                 self._take_over(run)
+            case Reset(run):
+                self._reset(run)
+            case CleanUp(run, merged):
+                self._clean_up(run, merged)
             case GoOn(run):
                 self._go_on(run)
             case Interrupt(run):
@@ -509,6 +531,145 @@ class Executor:
             ended_at=self._now(),
         )
 
+    # --- starting over ----------------------------------------------------------------
+
+    def _reset(self, run: Run) -> None:
+        run = self._fresh(run)
+        if run.state is not RunState.RESETTING:
+            facts = self._reread(run)
+            if not (
+                facts.presence is Presence.ON
+                and facts.status == TODO
+                and facts.is_open
+                and LABEL in facts.labels
+            ):
+                return  # the next poll sees what changed
+            run = self._to(run, RunState.RESETTING)
+        closed: list[str] = self._store.get(f"reset:{run.id}", [])
+        if not run.taken_over:
+            if run.ended_at is None:
+                self._end_agent(run)
+            closed = self._close_prs(run, closed)
+        self._tracker.remove_label(run, NEEDS_HUMAN)
+
+        worktree = Path(run.worktree_path) if run.worktree_path else None
+        gone = worktree is None or not worktree.exists()
+        kept = None if gone or run.taken_over else self._why_kept(run, Reason.DISCARDED)
+        run = self._to(
+            run,
+            RunState.DISCARDED,
+            comment("start-over", _start_over_text(run, closed, kept)),
+            ended_at=run.ended_at or self._now(),
+            stop_requested_at=None,
+            kept_reason=kept,
+            cleaned_up_at=self._now() if gone else run.cleaned_up_at,
+        )
+        self._store.remove(f"reset:{run.id}")
+        if not gone and not run.taken_over and kept is None:
+            self._clean_up(run, None)
+
+    def _end_agent(self, run: Run) -> None:
+        """Interrupt the agent and have Claude Code exit. Its shell stays."""
+        if run.claude_session_id is None:
+            return
+        terminal = self._herdr.run_terminal(run.id)
+        if terminal is None or not terminal.live:
+            return
+        if terminal.place is AgentPlace.UNKNOWN:
+            raise NightshiftError("the agent is still starting, so it cannot be ended yet")
+        if not terminal.has_claude:
+            return
+        if terminal.state in (AgentState.WORKING, AgentState.BLOCKED):
+            self._herdr.interrupt(terminal.address)
+        if not self._herdr.exit_claude(terminal.address, self._sleep):
+            raise NightshiftError("the agent could not be ended")
+
+    def _close_prs(self, run: Run, closed: list[str]) -> list[str]:
+        """Close the open PRs of the ticket's runs, except of those you took over."""
+        runs = [
+            r
+            for r in self._store.ticket_runs(run.ticket_ref)
+            if r.branch and not r.taken_over and r.repo_ref == run.repo_ref
+        ]
+        for facts in self._tracker.read_tickets(runs, set()).values():
+            if facts is None:
+                raise NightshiftError("the ticket's pull requests cannot be read")
+            for pr in facts.prs:
+                if pr.state is PrState.OPEN:
+                    closed = [*closed, pr.url]
+                    self._store.put(f"reset:{run.id}", closed)
+                    self._tracker.close_pr(pr.ref)
+        return list(dict.fromkeys(closed))
+
+    # --- cleaning up ------------------------------------------------------------------
+
+    def _report_only(self) -> str | None:
+        """In its first week Nightshift only says what it would remove."""
+        until = self._store.get(REPORT_ONLY_KEY)
+        if until is None:
+            until = (self._now() + REPORT_ONLY).isoformat()
+            self._store.put(REPORT_ONLY_KEY, until)
+        if self._now() >= datetime.fromisoformat(until):
+            return None
+        return f"Nightshift removes nothing before {until[:10]}, its first week"
+
+    def _why_kept(self, run: Run, reason: Reason) -> str | None:
+        verdict = self._cleanup.check(run, reason, frozenset(), "")
+        return verdict.unsafe or self._report_only()
+
+    def _clean_up(self, run: Run, pr: Pr | None) -> None:
+        run = self._fresh(run)
+        worktree, clone = Path(run.worktree_path or ""), Path(run.clone_path)
+        if run.state is RunState.DISCARDED:
+            reason = Reason.DISCARDED
+        else:
+            reason = Reason.MERGED if pr else Reason.CLOSED
+        if not clone.is_dir():
+            raise NightshiftError(f"the clone {clone} is missing")
+        commits = self._tracker.pr_commits(pr.ref) if pr else frozenset()
+        head = pr.head if pr else ""
+        if not worktree.exists():
+            # Removed by you, or by Nightshift right before a crash.
+            if run.kept_reason == REMOVING and pr and run.branch:
+                tip = self._git.tip(clone, run.branch)
+                if tip and self._cleanup.is_merged(clone, tip, commits, head):
+                    self._git.delete_branch(clone, run.branch, tip)
+            self._store.update_run(run, cleaned_up_at=self._now(), kept_reason=None)
+            return
+        verdict = self._cleanup.check(run, reason, commits, head)
+        if verdict.unsafe is not None:
+            self._keep(run, reason, verdict.unsafe)
+            return
+        if wait := self._report_only():
+            if run.kept_reason != wait:
+                logger.info("would remove {}: {}", worktree, reason)
+                self._store.update_run(run, kept_reason=wait)
+            return
+
+        logger.info("removing {}: {}", worktree, reason)
+        run = self._store.update_run(run, kept_reason=REMOVING)
+        self._cleanup.close_space(run)
+        verdict = self._cleanup.check(run, reason, commits, head)
+        if verdict.unsafe is not None:
+            self._keep(run, reason, verdict.unsafe)
+            return
+        self._git.remove_worktree(clone, worktree)
+        if verdict.branch_tip and run.branch:
+            self._git.delete_branch(clone, run.branch, verdict.branch_tip)
+        self._store.update_run(run, cleaned_up_at=self._now(), kept_reason=None)
+
+    def _keep(self, run: Run, reason: Reason, why: str) -> None:
+        if run.kept_reason == why:
+            return
+        text = (
+            f"The worktree `{run.worktree_path}` could be removed, because {reason}, but "
+            f"Nightshift keeps it: {why}. It looks again on every poll."
+        )
+        # A discarded run that kept its worktree said so when it started over.
+        told = reason is Reason.DISCARDED and run.kept_reason not in (None, REMOVING)
+        effects = [] if told else [comment("kept", text)]
+        self._to(run, run.state, *effects, kept_reason=why)
+
     # --- handing over -----------------------------------------------------------------
 
     def _complete(self, run: Run, pr_ref: str) -> None:
@@ -534,6 +695,21 @@ class Executor:
             effects.append(unlabel(NEEDS_HUMAN))
         effects.append(notification("In Review"))
         self._to(run, RunState.DONE, *effects, ended_at=self._now())
+
+
+def _start_over_text(run: Run, closed: list[str], kept: str | None) -> str:
+    if run.taken_over:
+        return (
+            "The ticket starts over. You took its earlier run over, so Nightshift leaves that "
+            f"run's branch `{run.branch}`, its pull request, its worktree and its agent alone."
+        )
+    lines = ["The ticket starts over.", ""]
+    lines += [f"- Closed: {url}" for url in closed]
+    if run.branch:
+        lines.append(f"- Kept: the branch `{run.branch}`, with every commit on it.")
+    if kept:
+        lines.append(f"- Kept for now: the worktree `{run.worktree_path}`, because {kept}.")
+    return "\n".join(lines)
 
 
 def _context(run: object) -> Any:

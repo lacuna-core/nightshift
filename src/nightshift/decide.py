@@ -26,6 +26,7 @@ from nightshift.model import (
     AgentPlace,
     AgentState,
     Claim,
+    CleanUp,
     Complete,
     Drop,
     End,
@@ -40,6 +41,7 @@ from nightshift.model import (
     Presence,
     Provision,
     PrState,
+    Reset,
     Resume,
     RunState,
     RunView,
@@ -76,7 +78,12 @@ def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     if view.run.live:
         changed = list(_changed_by_you(view))
         yield from changed or _live(view)
-    elif view.run.ended:
+    elif view.run.state is RunState.RESETTING:
+        yield Reset(view.run)  # one that has started always finishes
+    elif view.run.state is RunState.DISCARDED:
+        if view.run.cleaned_up_at is None and not view.run.taken_over:
+            yield CleanUp(view.run, None)
+    else:
         yield from _stopping(view, snapshot)
         yield from _ended(view)
 
@@ -145,7 +152,7 @@ def _changed_by_you(view: RunView) -> Iterator[Action]:
     elif not ticket.is_open:
         yield cancel("closed", "The issue was closed.")
     elif moved_to_todo(view):
-        yield cancel("todo", f"The ticket was moved back to {TODO}.")
+        yield Reset(run)
     elif pr is not None and pr.state is PrState.CLOSED and (finished(view) or gone):
         yield cancel("pr-closed", "The pull request was closed without merging.", needs_human=True)
     elif ticket.presence is Presence.REMOVED:
@@ -173,12 +180,31 @@ _TAKEN_OVER = (
 
 
 def _ended(view: RunView) -> Iterator[Action]:
-    run = view.run
-    if _taken_over(view):
-        if not run.taken_over:
-            yield TakeOver(run)
+    run, ticket = view.run, view.ticket
+    assert ticket is not None
+    if _taken_over(view) and not run.taken_over:
+        yield TakeOver(run)
+    elif moved_to_todo(view) and ticket.is_open and LABEL in ticket.labels:
+        yield Reset(run)
+    elif not run.taken_over:
+        yield from list(_helped(view)) or _clean_up(view)
+
+
+def _clean_up(view: RunView) -> Iterator[Action]:
+    """Is there a reason to clean up after a run that has ended (FR-13)?"""
+    run, ticket = view.run, view.ticket
+    assert ticket is not None
+    if run.cleaned_up_at is not None or run.worktree_path is None:
         return
-    yield from _helped(view)
+    pr = ticket.pr
+    if pr is not None and pr.state is PrState.MERGED:
+        yield CleanUp(run, pr)
+    elif (
+        not ticket.is_open
+        and view.agent.place is AgentPlace.CLOSED
+        and view.streaks.gone_polls >= GONE_POLLS
+    ):
+        yield CleanUp(run, None)
 
 
 def _live(view: RunView) -> Iterator[Action]:

@@ -398,6 +398,31 @@ class GitHub:
             {"input": {"subjectId": ticket_ref, "body": f"{text}\n\n{marker}"}},
         )
 
+    def close_pr(self, pr_ref: str) -> None:
+        self.graphql(
+            "mutation($input:ClosePullRequestInput!)"
+            "{closePullRequest(input:$input){clientMutationId}}",
+            {"input": {"pullRequestId": pr_ref}},
+        )
+
+    def pr_commits(self, pr_ref: str) -> frozenset[str]:
+        commits: set[str] = set()
+        after = None
+        while True:
+            node = self.graphql(
+                "query($id:ID!,$after:String){node(id:$id){... on PullRequest{"
+                "commits(first:100,after:$after){pageInfo{hasNextPage endCursor} "
+                "nodes{commit{oid}}}}}}",
+                {"id": pr_ref, "after": after},
+            )["node"]
+            if not node:
+                raise TrackerNotFoundError("the pull request was not found")
+            page = node["commits"]
+            commits |= {n["commit"]["oid"] for n in page["nodes"]}
+            if not page["pageInfo"]["hasNextPage"]:
+                return frozenset(commits)
+            after = page["pageInfo"]["endCursor"]
+
     def _board_pages(
         self, url: str, fields: str, item_fields: str, search: str | None = None
     ) -> Iterator[dict[str, Any]]:

@@ -80,3 +80,86 @@ class Git:
     def _tip(self, cwd: Path, ref: str) -> str | None:
         result = self._git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
         return result.out.strip() if result.code == 0 else None
+
+    # --- removing ---------------------------------------------------------------------
+
+    def tip(self, clone: Path, branch: str) -> str | None:
+        return self._tip(clone, f"refs/heads/{branch}")
+
+    def is_ancestor(self, clone: Path, commit: str, of: str) -> bool:
+        """Is the commit part of the other's history? False if either is not known here."""
+        return self._git(clone, "merge-base", "--is-ancestor", commit, of).code == 0
+
+    def unsafe(self, clone: Path, worktree: Path, branch: str, *, ignored: bool) -> str | None:
+        """Why removing this worktree could lose something, or would be refused by git.
+
+        Anything that cannot be told counts as unsafe. ``ignored``: files that git ignores
+        count as work too.
+        """
+        try:
+            return self._unsafe(clone, worktree, branch, ignored=ignored)
+        except GitError as e:
+            return str(e)
+
+    def _unsafe(self, clone: Path, worktree: Path, branch: str, *, ignored: bool) -> str | None:
+        ours = self._ok(clone, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        theirs = self._ok(
+            worktree, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"
+        ).splitlines()
+        if theirs[0] != ours or Path(theirs[1]).resolve() != worktree.resolve():
+            return "it is not a worktree of the clone"
+        if self.worktree_branch(worktree) != branch:
+            return f"it is not on the branch `{branch}`"
+        git_dir = Path(
+            self._ok(worktree, "rev-parse", "--path-format=absolute", "--git-dir").strip()
+        )
+        for name, what in _IN_PROGRESS.items():
+            if (git_dir / name).exists():
+                return f"a {what} is in progress"
+        if (git_dir / "locked").exists():
+            return "it is locked"
+        if (git_dir / "modules").exists() or any(
+            line.startswith("160000 ")
+            for line in self._ok(worktree, "ls-files", "--stage").splitlines()
+        ):
+            return "it has submodules, which git refuses to remove"
+        if any(
+            line[:1].islower() or line[:1] == "S"
+            for line in self._ok(worktree, "ls-files", "-v").splitlines()
+        ):
+            return "it has files whose changes git was told to overlook"
+        changes = self._ok(
+            worktree, "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+            "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none",
+            *(["--ignored=traditional"] if ignored else []), timeout=300,
+        ).splitlines()  # fmt: skip
+        if any(not line.startswith(("??", "!!")) for line in changes):
+            return "it has uncommitted changes"
+        if any(line.startswith("??") for line in changes):
+            return "it has untracked files"
+        if changes:
+            return "it has files that git ignores"
+        return None
+
+    def remove_worktree(self, clone: Path, worktree: Path) -> None:
+        """Never with ``--force``: git itself refuses to remove changes."""
+        self._ok(clone, "worktree", "remove", str(worktree), timeout=300)
+
+    def delete_branch(self, clone: Path, branch: str, expected: str) -> None:
+        """Delete a local branch, only while it is at the expected commit."""
+        listed = self._ok(clone, "worktree", "list", "--porcelain").splitlines()
+        if f"branch refs/heads/{branch}" in listed:
+            raise GitError(f"branch {branch} is checked out in a worktree")
+        self._ok(clone, "update-ref", "-d", f"refs/heads/{branch}", expected)
+        self._git(clone, "config", "--remove-section", f"branch.{branch}")
+
+
+_IN_PROGRESS = {
+    "rebase-merge": "rebase",
+    "rebase-apply": "rebase",
+    "MERGE_HEAD": "merge",
+    "CHERRY_PICK_HEAD": "cherry-pick",
+    "REVERT_HEAD": "revert",
+    "BISECT_LOG": "bisect",
+    "sequencer": "cherry-pick or revert",
+}

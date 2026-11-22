@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nightshift import proc
+from nightshift.cleanup import Cleanup
 from nightshift.errors import TrackerNotFoundError, TrackerUnavailableError
 from nightshift.executor import Executor
 from nightshift.git import Git
@@ -207,12 +208,13 @@ class FakeHerdr:
         if args[0] == "claude":
             return Result(0, "2.1.323", "")
         if args[0] == "lsof":
-            folders = [
-                t["foreground"]["cwd"]
+            found = [
+                (t["foreground"]["pid"], str(Path(t["foreground"]["cwd"]).resolve()))
                 for t in self.terminals.values()
                 if t["state"] == "live" and t["foreground"]["name"] == "claude"
             ]
-            return Result(0, "".join(f"p1\nn{f}\n" for f in [*folders, *self.elsewhere]), "")
+            found += [(1, folder) for folder in self.elsewhere]
+            return Result(0, "".join(f"p{pid}\nfcwd\nn{f}\n" for pid, f in found), "")
         assert args[0] == "hc", args
         if self.down:
             return Result(1, "", "cannot connect")
@@ -423,6 +425,10 @@ class World:
         )
         self.start()
 
+    def arm(self) -> None:
+        """The report-only week is over."""
+        self.store.put("report-only-until", (self.clock - timedelta(days=1)).isoformat())
+
     def start(self) -> None:
         """Start Nightshift, also after a crash: nothing but the files is kept."""
         self.stop = Flag()
@@ -435,7 +441,7 @@ class World:
         )  # fmt: skip
         self.executor = Executor(
             store=self.store, tracker=self.tracker, herdr=Herdr(self.hc), git=self.git,
-            notifier=self.notifier, paths=self.paths, repos=self.observer.repo,
+            cleanup=Cleanup(Herdr(self.hc), self._claude(), self.git), notifier=self.notifier, paths=self.paths, repos=self.observer.repo,
             now=lambda: self.clock, sleep=lambda seconds: None,
         )  # fmt: skip
         self.loop = Loop(

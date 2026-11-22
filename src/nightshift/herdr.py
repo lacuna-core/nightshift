@@ -206,6 +206,21 @@ class Herdr:
     def send(self, address: str, text: str) -> None:
         self._hc("send", address, text, "--json")
 
+    def kill(self, address: str) -> None:
+        self._hc("kill", address, "--json", timeout=40)
+
+    def exit_claude(self, address: str, sleep: Callable[[float], None], seconds: int = 10) -> bool:
+        """Have Claude Code exit; its shell stays. Not with ``/exit``: text that is already in
+        the input box would turn that into a message."""
+        for _ in range(3):
+            self._hc("keys", address, "ctrl+c", "ctrl+c", "--json")
+            for _ in range(seconds):
+                terminal = self.get(address)
+                if terminal is None or not terminal.has_claude:
+                    return True
+                sleep(0.4)
+        return False
+
     def interrupt(self, address: str) -> bool:
         """Stop the current turn, not the process. Did it work?"""
         answer = self._hc("interrupt", address, "--json", timeout=40)

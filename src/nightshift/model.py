@@ -285,17 +285,8 @@ class RunView:
     active: bool = False
     """Its state, turn or screen changed since the last poll."""
 
-    cleanup: Cleanup | None = None
     stall_timeout: timedelta = timedelta(minutes=20)
     max_run_time: timedelta = timedelta(hours=3)
-
-
-@dataclass(frozen=True)
-class Cleanup:
-    """What is left of a run locally, and why it may not be removed (spec FR-13)."""
-
-    worktree_exists: bool
-    unsafe: str | None
 
 
 @dataclass(frozen=True)
@@ -405,6 +396,22 @@ class TakeOver:
 
 
 @dataclass(frozen=True)
+class Reset:
+    """You moved the ticket back to Todo: start over (FR-16)."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
+class CleanUp:
+    """There is a reason to remove the worktree; do so if it is safe (FR-13)."""
+
+    run: Run
+    merged: Pr | None
+    """The merged PR, if that is the reason."""
+
+
+@dataclass(frozen=True)
 class GoOn:
     """The agent that needed you works again."""
 
@@ -469,6 +476,8 @@ Action = (
     | Wait
     | Finish
     | TakeOver
+    | Reset
+    | CleanUp
     | GoOn
     | Interrupt
     | GiveUpStopping
