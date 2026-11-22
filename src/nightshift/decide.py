@@ -23,17 +23,20 @@ from nightshift.model import (
     Claim,
     Complete,
     Drop,
+    End,
     Flag,
     Item,
     NameTab,
     Pick,
     Presence,
     Provision,
+    Resume,
     RunState,
     RunView,
     Snapshot,
     Unflag,
     Update,
+    Wait,
 )
 
 GONE = frozenset({AgentPlace.EXITED, AgentPlace.LOST, AgentPlace.CLOSED})
@@ -100,6 +103,10 @@ def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
             complete = run.state is RunState.COMPLETING or finished(view)
             if ticket.pr is not None and ticket.pr.ready and complete:
                 yield Complete(run, ticket.pr)
+            elif run.state is RunState.COMPLETING:
+                yield Update(run, {"state": RunState.RUNNING})  # the PR is not ready after all
+            elif view.agent.place in GONE:
+                yield from _gone(view)
 
 
 def claimed(view: RunView) -> Action:
@@ -112,6 +119,49 @@ def claimed(view: RunView) -> Action:
     if ticket.presence is not Presence.ON:
         return Drop(run, "the ticket is not on the board")
     return Claim(run)
+
+
+def _gone(view: RunView) -> Iterator[Action]:
+    """Why an agent is gone decides what happens (NFR-4)."""
+    run = view.run
+    if view.streaks.gone_polls < GONE_POLLS:
+        return
+    match view.agent.place:
+        case AgentPlace.CLOSED:
+            yield End(
+                run,
+                RunState.CANCELLED,
+                "tab-closed",
+                "The agent's tab was closed before there was a pull request.",
+                needs_human=True,
+            )
+        case AgentPlace.EXITED:
+            yield End(
+                run,
+                RunState.FAILED,
+                "failed",
+                "Claude Code exited without a pull request that is ready for review.",
+                needs_human=True,
+            )
+        case AgentPlace.LOST if view.agent.other_claude:
+            if run.state is not RunState.WAITING:
+                yield Wait(
+                    run,
+                    f"waiting-resumed-{run.resume_count}",
+                    "The agent was lost in a crash or restart, and some Claude Code already "
+                    "runs in its worktree, so Nightshift does not resume it.",
+                )
+        case AgentPlace.LOST if run.resume_count:
+            yield End(
+                run,
+                RunState.FAILED,
+                "failed",
+                "The agent was lost in a crash or restart for the second time.",
+                needs_human=True,
+            )
+        case AgentPlace.LOST:
+            go_on = run.state is RunState.RUNNING and run.limited_since is None
+            yield Resume(run, "continue" if go_on else None)
 
 
 def finished(view: RunView) -> bool:

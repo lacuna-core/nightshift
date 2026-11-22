@@ -27,6 +27,15 @@ class Claude:
             raise ToolError(f"`claude --version` failed: {result.err.strip()}")
         return result.out.strip()
 
+    def folders(self) -> list[Path]:
+        """The folders that Claude Code runs in on this machine, inside Herdr or not."""
+        result = self._run(["lsof", "-a", "-c", "claude", "-d", "cwd", "-F", "n"], timeout=30)
+        return [Path(line[1:]) for line in result.out.splitlines() if line.startswith("n")]
+
+    def runs_in(self, worktree: Path) -> bool:
+        wanted = worktree.resolve()
+        return any(folder == wanted or wanted in folder.parents for folder in self.folders())
+
     def trusts(self, clone: Path) -> bool | None:
         """Was the trust dialog accepted for this folder? None if that cannot be told.
 

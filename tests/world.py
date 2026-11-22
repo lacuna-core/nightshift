@@ -194,6 +194,7 @@ class FakeHerdr:
         self.starts: list[list[str]] = []
         self.calls: list[str] = []
         self.sticky_interrupt = False
+        self.elsewhere: list[str] = []
         self.before: Callable[[str], None] = lambda what: None
 
     def __call__(
@@ -203,8 +204,13 @@ class FakeHerdr:
             return self._app(list(args[1:]))
         if args[0] == "claude":
             return Result(0, "2.1.323", "")
-        if args[0] in ("osascript", "lsof"):
-            return Result(0, "", "")
+        if args[0] == "lsof":
+            folders = [
+                t["foreground"]["cwd"]
+                for t in self.terminals.values()
+                if t["state"] == "live" and t["foreground"]["name"] == "claude"
+            ]
+            return Result(0, "".join(f"p1\nn{f}\n" for f in [*folders, *self.elsewhere]), "")
         assert args[0] == "hc", args
         if self.down:
             return Result(1, "", "cannot connect")

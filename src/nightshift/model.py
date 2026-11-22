@@ -369,6 +369,35 @@ class Complete:
 
 
 @dataclass(frozen=True)
+class End:
+    """End a live run without handing it over."""
+
+    run: Run
+    state: RunState
+    event: str
+    reason: str
+    needs_human: bool = False
+    interrupt: bool = False
+
+
+@dataclass(frozen=True)
+class Wait:
+    """The run needs you, and keeps its slot."""
+
+    run: Run
+    event: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class Resume:
+    """Continue a lost agent in its own terminal, with the same session."""
+
+    run: Run
+    message: str | None
+
+
+@dataclass(frozen=True)
 class Update:
     """Record what was seen. Changes nothing outside the database."""
 
@@ -399,4 +428,17 @@ class Unflag:
     key: str
 
 
-Action = Pick | Claim | Drop | Provision | Complete | Update | NameTab | Flag | Unflag
+Action = (
+    End
+    | Wait
+    | Resume
+    | Pick
+    | Claim
+    | Drop
+    | Provision
+    | Complete
+    | Update
+    | NameTab
+    | Flag
+    | Unflag
+)

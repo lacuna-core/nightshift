@@ -28,22 +28,26 @@ from nightshift.git import Git
 from nightshift.herdr import Herdr, new_id
 from nightshift.model import (
     Action,
+    AgentPlace,
     Brief,
     Claim,
     Complete,
     Drop,
+    End,
     Flag,
     Item,
     NameTab,
     Pick,
     Presence,
     Provision,
+    Resume,
     Run,
     RunState,
     RunView,
     TicketFacts,
     Unflag,
     Update,
+    Wait,
 )
 from nightshift.observe import RepoState
 from nightshift.project_config import Paths
@@ -140,6 +144,12 @@ class Executor:
                 self._provision(run)
             case Complete(run, pr):
                 self._complete(run, pr.ref)
+            case End():
+                self._end(action)
+            case Wait(run, event, reason):
+                self._wait(self._fresh(run), event, reason)
+            case Resume(run, message):
+                self._resume(run, message)
             case Update(run, changes):
                 self._store.update_run(run, **changes)
             case NameTab(run):
@@ -353,6 +363,53 @@ class Executor:
             herdr_tab_id=new_id("tb"),
             claude_session_id=str(uuid4()),
         )
+
+    def _resume(self, run: Run, message: str | None) -> None:
+        run = self._fresh(run)
+        terminal = self._herdr.run_terminal(run.id)
+        if terminal is None or terminal.place is not AgentPlace.LOST:
+            return  # the next poll sees what changed
+        if not Path(run.worktree_path or "").is_dir():
+            self._fail(run, "The agent was lost in a crash or restart, and its worktree is gone.")
+            return
+        if not terminal.is_bare_shell:
+            self._wait(
+                run,
+                f"waiting-resumed-{run.resume_count}",
+                "The agent was lost in a crash or restart, and its terminal is in use, so "
+                "Nightshift does not resume it.",
+            )
+            return
+        run = self._store.update_run(run, resume_count=run.resume_count + 1)
+        logger.info("resuming the lost agent")
+        self._herdr.send(
+            terminal.address, claude_code.resume_line(run.claude_session_id or "", message)
+        )
+        self._herdr.mark_shell(terminal)
+        self._herdr.wait_for_claude(terminal.address, self._sleep)
+
+    def _wait(self, run: Run, event: str, reason: str) -> None:
+        if run.state is RunState.WAITING:
+            return
+        self._to(
+            run,
+            RunState.WAITING,
+            label(NEEDS_HUMAN),
+            comment(event, f"The agent needs you. {reason}"),
+            notification(f"Needs you: {reason}"),
+            state_reason=reason,
+        )
+
+    def _end(self, end: End) -> None:
+        run = self._fresh(end.run)
+        if not run.live:
+            return
+        if end.state is RunState.FAILED:
+            self._fail(run, end.reason)
+            return
+        effects = [label(NEEDS_HUMAN)] if end.needs_human else []
+        effects.append(comment(end.event, f"Nightshift stopped working on this. {end.reason}"))
+        self._to(run, end.state, *effects, state_reason=end.reason, ended_at=self._now())
 
     def _cannot_start(self, run: Run, reason: str) -> None:
         self._fail(run, f"The agent could not be started: {reason}")

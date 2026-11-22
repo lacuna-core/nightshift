@@ -52,8 +52,9 @@ class ReadTracker(Protocol):
     def repo_info(self, slug: str) -> RepoInfo: ...
 
 
-class ToolVersion(Protocol):
+class ReadClaude(Protocol):
     def version(self) -> str: ...
+    def runs_in(self, worktree: Path) -> bool: ...
 
 
 @dataclass
@@ -115,7 +116,7 @@ class Observer:
         store: Store,
         tracker: ReadTracker,
         herdr: Herdr,
-        claude: ToolVersion,
+        claude: ReadClaude,
         git: Git,
         now: Callable[[], datetime],
         monotonic: Callable[[], float],
@@ -278,6 +279,13 @@ class Observer:
             return view
         return replace(view, stall_timeout=config.stall_timeout, max_run_time=config.max_run_time)
 
+    def _other_claude(self, run: Run) -> bool:
+        try:
+            return self._claude.runs_in(Path(run.worktree_path or "/"))
+        except NightshiftError as e:
+            logger.warning("{}", e)
+            return True  # it cannot be told, so nothing is resumed
+
     def _agent(self, run: Run) -> tuple[Agent, str]:
         if run.claude_session_id is None or run.state is RunState.PROVISIONING:
             return UNKNOWN_AGENT, ""
@@ -286,6 +294,8 @@ class Observer:
             if terminal is None:
                 return Agent(AgentPlace.CLOSED), ""
             agent = terminal.agent()
+            if agent.place is AgentPlace.LOST:
+                agent = replace(agent, other_claude=self._other_claude(run))
             screen = ""
             if agent.place is AgentPlace.ALIVE and agent.state is AgentState.WORKING:
                 screen = screen_signature(self._herdr.screen(terminal.address))
