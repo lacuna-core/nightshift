@@ -27,14 +27,20 @@ from nightshift.errors import (
 from nightshift.git import Git
 from nightshift.herdr import Herdr, new_id
 from nightshift.model import (
+    UNKNOWN_AGENT,
     Action,
+    Agent,
     AgentPlace,
+    AgentState,
     Brief,
     Claim,
     Complete,
     Drop,
     End,
     Flag,
+    GiveUpStopping,
+    GoOn,
+    Interrupt,
     Item,
     NameTab,
     Pick,
@@ -148,6 +154,12 @@ class Executor:
                 self._end(action)
             case Wait(run, event, reason):
                 self._wait(self._fresh(run), event, reason)
+            case GoOn(run):
+                self._go_on(run)
+            case Interrupt(run):
+                self._interrupt(run)
+            case GiveUpStopping(run):
+                self._give_up_stopping(run)
             case Resume(run, message):
                 self._resume(run, message)
             case Update(run, changes):
@@ -404,12 +416,60 @@ class Executor:
         run = self._fresh(end.run)
         if not run.live:
             return
+        agent = self._agent(run)
+        busy = agent.place is AgentPlace.ALIVE and agent.state in (
+            AgentState.WORKING,
+            AgentState.BLOCKED,
+        )
+        # The turn is recorded first: only that one may be interrupted, not a later one.
+        run = self._store.update_run(
+            run,
+            turn_at_end=agent.turn,
+            stop_requested_at=self._now() if end.interrupt and busy else None,
+        )
         if end.state is RunState.FAILED:
-            self._fail(run, end.reason)
-            return
+            run = self._fail(run, end.reason)
+        else:
+            run = self._cancel(run, end)
+        if run.stop_requested_at is not None:
+            self._interrupt(run)
+
+    def _cancel(self, run: Run, end: End) -> Run:
         effects = [label(NEEDS_HUMAN)] if end.needs_human else []
         effects.append(comment(end.event, f"Nightshift stopped working on this. {end.reason}"))
-        self._to(run, end.state, *effects, state_reason=end.reason, ended_at=self._now())
+        return self._to(run, end.state, *effects, state_reason=end.reason, ended_at=self._now())
+
+    def _agent(self, run: Run) -> Agent:
+        if run.claude_session_id is None:
+            return UNKNOWN_AGENT
+        terminal = self._herdr.run_terminal(run.id)
+        return Agent(AgentPlace.CLOSED) if terminal is None else terminal.agent()
+
+    def _interrupt(self, run: Run) -> None:
+        """Stop the turn the run ended in, and see whether it worked."""
+        run = self._fresh(run)
+        terminal = self._herdr.run_terminal(run.id)
+        if run.stop_requested_at is None or terminal is None or not terminal.has_claude:
+            return
+        if terminal.turn != run.turn_at_end:
+            return  # a new turn, which is yours
+        logger.info("interrupting the agent")
+        if self._herdr.interrupt(terminal.address):
+            turn = self._agent(run).turn
+            self._store.update_run(run, stop_requested_at=None, turn_at_end=turn)
+
+    def _give_up_stopping(self, run: Run) -> None:
+        self._to(
+            run,
+            run.state,
+            label(NEEDS_HUMAN),
+            comment("cannot-stop", "The agent cannot be stopped. Please stop it in its tab."),
+            notification("The agent cannot be stopped"),
+            stop_requested_at=None,
+        )
+
+    def _go_on(self, run: Run) -> None:
+        self._to(run, RunState.RUNNING, unlabel(NEEDS_HUMAN), state_reason=None)
 
     def _cannot_start(self, run: Run, reason: str) -> None:
         self._fail(run, f"The agent could not be started: {reason}")

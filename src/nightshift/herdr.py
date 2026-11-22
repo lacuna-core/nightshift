@@ -206,6 +206,11 @@ class Herdr:
     def send(self, address: str, text: str) -> None:
         self._hc("send", address, text, "--json")
 
+    def interrupt(self, address: str) -> bool:
+        """Stop the current turn, not the process. Did it work?"""
+        answer = self._hc("interrupt", address, "--json", timeout=40)
+        return answer.get("outcome") in ("stopped", "exited")
+
     def name_tab(self, tab: str, name: str) -> bool:
         """Name a tab that still has its default name. False: try again later."""
         try:

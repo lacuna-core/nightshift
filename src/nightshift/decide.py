@@ -5,15 +5,18 @@ before it writes. Nothing here does I/O.
 """
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from nightshift.conventions import (
     FINISHED_POLLS,
+    GIVE_UP_STOPPING,
     GONE_POLLS,
+    IDLE_NEEDS_YOU,
     IN_PROGRESS,
     LABEL,
     NEEDS_HUMAN,
+    NO_STATE_NEEDS_YOU,
     TODO,
 )
 from nightshift.model import (
@@ -25,12 +28,17 @@ from nightshift.model import (
     Drop,
     End,
     Flag,
+    GiveUpStopping,
+    GoOn,
+    Interrupt,
     Item,
     NameTab,
     Pick,
     Presence,
     Provision,
+    PrState,
     Resume,
+    Run,
     RunState,
     RunView,
     Snapshot,
@@ -62,7 +70,11 @@ def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
         yield NameTab(view.run)
     if changes := _seen(view, snapshot.now):
         yield Update(view.run, changes)
-    yield from _live(view, snapshot)
+    if view.run.live:
+        yield from _live(view, snapshot)
+    elif view.run.ended:
+        yield from _stopping(view, snapshot)
+        yield from _helped(view)
 
 
 def _has_tab(view: RunView) -> bool:
@@ -107,6 +119,8 @@ def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
                 yield Update(run, {"state": RunState.RUNNING})  # the PR is not ready after all
             elif view.agent.place in GONE:
                 yield from _gone(view)
+            elif view.agent.place is AgentPlace.ALIVE:
+                yield from _alive(view)
 
 
 def claimed(view: RunView) -> Action:
@@ -119,6 +133,93 @@ def claimed(view: RunView) -> Action:
     if ticket.presence is not Presence.ON:
         return Drop(run, "the ticket is not on the board")
     return Claim(run)
+
+
+def _alive(view: RunView) -> Iterator[Action]:
+    """Does the agent need you (FR-10), or has it failed (FR-11)?"""
+    run, agent, streaks = view.run, view.agent, view.streaks
+    if agent.limit is not None:
+        return
+    if run.state is RunState.WAITING:
+        if agent.state is AgentState.WORKING:
+            yield GoOn(run)
+        return
+    if reason := _needs_you(view):
+        yield Wait(run, f"waiting-{agent.turn}-{agent.state}", reason)
+    elif agent.state is AgentState.WORKING and streaks.quiet_seconds > _seconds(view.stall_timeout):
+        minutes = int(_seconds(view.stall_timeout) // 60)
+        yield _failed(run, f"The agent showed no activity for more than {minutes} minutes.")
+    elif run.active_seconds > _seconds(view.max_run_time):
+        yield _failed(run, f"The run took longer than {view.max_run_time}.")
+
+
+def _seconds(duration: timedelta) -> float:
+    return duration.total_seconds()
+
+
+def _failed(run: Run, reason: str) -> End:
+    return End(run, RunState.FAILED, "failed", reason, needs_human=True, interrupt=True)
+
+
+def _needs_you(view: RunView) -> str | None:
+    agent, streaks = view.agent, view.streaks
+    match agent.state:
+        case AgentState.BLOCKED:
+            what = {
+                "permission": "It waits for a permission.",
+                "question": "It asks a question.",
+                "auth": "It needs you to log in.",
+            }
+            return what.get(agent.kind, "It is blocked on a question or a permission.")
+        case AgentState.ERROR:
+            return "It stopped with an error."
+        case AgentState.NONE if streaks.silent_seconds >= _seconds(NO_STATE_NEEDS_YOU):
+            return "Claude Code shows a dialog from before its session, such as the trust dialog."
+        case AgentState.IDLE | AgentState.DONE if streaks.idle_seconds >= _seconds(IDLE_NEEDS_YOU):
+            pr = view.ticket.pr if view.ticket else None
+            if pr is not None and pr.state is PrState.MERGED:
+                return None
+            if pr is not None and pr.ready:
+                return None
+            return "It stopped without a pull request that is ready for review."
+    return None
+
+
+def _stopping(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
+    """Repeat an interrupt until the agent stopped, but never after a new turn (FR-12)."""
+    run, agent = view.run, view.agent
+    if run.stop_requested_at is None or agent.place is AgentPlace.UNKNOWN:
+        return
+    busy = agent.place is AgentPlace.ALIVE and agent.state in (
+        AgentState.WORKING,
+        AgentState.BLOCKED,
+    )
+    if not busy or agent.turn != run.turn_at_end:
+        yield Update(run, {"stop_requested_at": None, "turn_at_end": agent.turn})
+    elif snapshot.now - run.stop_requested_at > GIVE_UP_STOPPING:
+        yield GiveUpStopping(run)
+    else:
+        yield Interrupt(run)
+
+
+def _helped(view: RunView) -> Iterator[Action]:
+    """A failed or cancelled run that you helped along (FR-18)."""
+    run, ticket = view.run, view.ticket
+    assert ticket is not None
+    pr = ticket.pr
+    if run.state not in (RunState.FAILED, RunState.CANCELLED) or run.taken_over:
+        return
+    if ticket.presence is not Presence.ON or ticket.status != IN_PROGRESS or not ticket.is_open:
+        return
+    if LABEL not in ticket.labels or ticket.label_removed:
+        return
+    if pr is None or not pr.ready or not finished(view):
+        return
+    ended = run.ended_at or run.created_at
+    new_turn = run.turn_at_end is not None and view.agent.turn > run.turn_at_end
+    new_pr = pr.created_at > ended or (pr.reopened_at is not None and pr.reopened_at > ended)
+    if new_turn or new_pr:
+        yield Complete(run, pr)
 
 
 def _gone(view: RunView) -> Iterator[Action]:

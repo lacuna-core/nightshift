@@ -18,6 +18,7 @@ LABELS = {
 POLL_INTERVAL = timedelta(seconds=60)
 IDLE_NEEDS_YOU = timedelta(minutes=5)
 NO_STATE_NEEDS_YOU = timedelta(minutes=2)
+GIVE_UP_STOPPING = timedelta(minutes=10)
 LIMIT_RETRY = timedelta(minutes=30)
 BRANCH_MAX = 40
 TODO_POLLS = 3

@@ -390,6 +390,27 @@ class Wait:
 
 
 @dataclass(frozen=True)
+class GoOn:
+    """The agent that needed you works again."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
+class Interrupt:
+    """Stop the agent's current turn, as asked when the run ended."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
+class GiveUpStopping:
+    """The agent of an ended run cannot be stopped: tell you."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
 class Resume:
     """Continue a lost agent in its own terminal, with the same session."""
 
@@ -431,6 +452,9 @@ class Unflag:
 Action = (
     End
     | Wait
+    | GoOn
+    | Interrupt
+    | GiveUpStopping
     | Resume
     | Pick
     | Claim
