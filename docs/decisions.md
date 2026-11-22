@@ -65,3 +65,46 @@ commit messages and the PR title, where release notes read it.
 **Consequences:** Branch names are unique, link straight to their ticket and need no
 guessing. Work without an issue now needs one created first, which adds a small step to
 quick fixes. Branch names no longer show the kind of change at a glance.
+
+## 2026-11-21 — One instance serves many boards and repos
+
+**Context:** The first spec draft ran one Nightshift per repo, with the config committed
+in that repo. Working on several projects meant running and watching several loops.
+
+**Decision:** One instance per machine serves every board and repo listed in a config in
+the user's home directory. Repos are listed as paths to local clones, and worktrees are
+made from them. Boards and repos are independent lists; the issue says which repo a
+ticket belongs to. The agent limit is set per board.
+
+**Consequences:** Repos hold nothing of Nightshift's. Boards never compete for slots, but
+nothing caps the machine as a whole: the total is the sum of the limits. The
+config is no longer shared through git, so each machine is set up separately. Runs must
+be identified by repo as well as issue number.
+
+## 2026-11-21 — Agents run in Herdr through its core
+
+**Context:** Agents need terminals a person can watch and take over, which survive
+Nightshift stopping. Herdr has two interfaces: the window's commands, which need the
+window open, and its core's CLI, which does not.
+
+**Decision:** Nightshift uses the core's CLI and plain git worktrees, and the window's
+commands only to name tabs. Terminals are labelled so that Herdr shows them in the right
+space, and agent state is what Claude Code reports to Herdr.
+
+**Consequences:** Nightshift works with the window closed and needs no Claude Code hooks.
+Spaces carry Herdr's default, the folder name, and tabs are named only while the window is
+open. Herdr's API is a 0.x preview and may break on an update.
+
+## 2026-11-21 — Moving a ticket back to Todo starts over, keeping unsafe leftovers
+
+**Context:** A ticket that goes back to `Todo` still has a branch, a worktree and perhaps
+a PR from its earlier run. The next run could continue from them or start clean.
+
+**Decision:** It starts clean, on the next numbered branch. Nightshift closes the old PR
+but keeps the branch, and removes the old worktree only if nothing in it can be lost and
+nobody is using it. The same rule covers every cleanup: a change on GitHub never destroys
+local work, because its local effect is hard to foresee.
+
+**Consequences:** One board move has one meaning, a new run never inherits a bad attempt,
+and no commits or uncommitted changes are lost. Old branches, and worktrees that are not
+safe to remove, pile up until someone deals with them.
