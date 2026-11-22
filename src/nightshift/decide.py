@@ -5,6 +5,7 @@ before it writes. Nothing here does I/O.
 """
 
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 from nightshift.conventions import (
@@ -24,6 +25,7 @@ from nightshift.model import (
     Drop,
     Flag,
     Item,
+    NameTab,
     Pick,
     Presence,
     Provision,
@@ -53,12 +55,24 @@ def decide(snapshot: Snapshot) -> list[Action]:
 def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     if view.ticket is None:
         return
-    if changes := _seen(view):
+    if _has_tab(view):
+        yield NameTab(view.run)
+    if changes := _seen(view, snapshot.now):
         yield Update(view.run, changes)
     yield from _live(view, snapshot)
 
 
-def _seen(view: RunView) -> dict[str, Any]:
+def _has_tab(view: RunView) -> bool:
+    run = view.run
+    placed = run.herdr_tab_id is not None and run.state not in (
+        RunState.CLAIMED,
+        RunState.PROVISIONING,
+        RunState.DISCARDED,
+    )
+    return placed and not run.tab_named and view.agent.place is AgentPlace.ALIVE
+
+
+def _seen(view: RunView, now: datetime) -> dict[str, Any]:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     changes: dict[str, Any] = {}
@@ -66,6 +80,11 @@ def _seen(view: RunView) -> dict[str, Any]:
         changes["seen_out_of_todo"] = True
     if ticket.pr is not None and ticket.pr.ref != run.pr_ref:
         changes["pr_ref"] = ticket.pr.ref
+    if run.state is RunState.RUNNING and view.agent.place is AgentPlace.ALIVE:
+        if view.agent.limit is None and int(view.elapsed):
+            changes["active_seconds"] = run.active_seconds + int(view.elapsed)
+        if view.active:
+            changes["last_activity_at"] = now
     return changes
 
 
@@ -74,7 +93,7 @@ def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     assert ticket is not None
     match run.state:
         case RunState.CLAIMED:
-            yield _claimed(view)
+            yield claimed(view)
         case RunState.PROVISIONING:
             yield Provision(run)
         case RunState.RUNNING | RunState.WAITING | RunState.COMPLETING:
@@ -83,7 +102,7 @@ def _live(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
                 yield Complete(run, ticket.pr)
 
 
-def _claimed(view: RunView) -> Action:
+def claimed(view: RunView) -> Action:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     if ticket.status == IN_PROGRESS:

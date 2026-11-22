@@ -160,7 +160,7 @@ class Store:
         return _to_run(row) if row else None
 
     def runs(self) -> list[Run]:
-        rows = self._db.execute("SELECT * FROM runs ORDER BY created_at, id").fetchall()
+        rows = self._db.execute("SELECT * FROM runs ORDER BY rowid").fetchall()
         return [_to_run(row) for row in rows]
 
     def watched_runs(self) -> list[Run]:

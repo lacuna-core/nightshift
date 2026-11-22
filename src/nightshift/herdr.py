@@ -2,11 +2,91 @@
 
 import json
 import re
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from nightshift.conventions import HERDR_MINOR, HERDR_TESTED
 from nightshift.errors import HerdrError, ToolError
+from nightshift.model import Agent, AgentPlace, AgentState
 from nightshift.proc import Runner
+
+SHELL = "/bin/zsh"
+RUN_LABEL = "nightshift.run"
+TICKET_LABEL = "nightshift.ticket"
+SHELL_LABEL = "nightshift.shell"
+SPACE_LABEL = "herdr.space"
+TAB_LABEL = "herdr.tab"
+_AGENT_SCRIPT = f'claude "$@"; exec {SHELL} -l -i'
+
+
+def is_claude(name: str, argv: Sequence[str]) -> bool:
+    return name == "claude" or (bool(argv) and argv[0].rsplit("/", 1)[-1] == "claude")
+
+
+@dataclass(frozen=True)
+class Terminal:
+    """One of Herdr's terminals."""
+
+    address: str
+    live: bool
+    argv: tuple[str, ...]
+    cwd: str
+    labels: dict[str, str]
+    pid: int | None
+    turn: int
+    reason: str
+    reported: bool
+    state: AgentState
+    has_status: bool
+    kind: str
+    fg_name: str
+    fg_argv: tuple[str, ...]
+    fg_cwd: str
+    fg_pid: int | None
+
+    @property
+    def has_claude(self) -> bool:
+        return self.live and is_claude(self.fg_name, self.fg_argv)
+
+    @property
+    def is_bare_shell(self) -> bool:
+        """An empty shell prompt: no program, and not a shell that runs a script."""
+        if not self.live or not self.fg_argv:
+            return False
+        program = self.fg_argv[0].rsplit("/", 1)[-1].lstrip("-")
+        options = self.fg_argv[1:]
+        return program in _SHELLS and all(o in ("-l", "-i", "-li", "--login") for o in options)
+
+    @property
+    def replaced(self) -> bool:
+        """Is this a fresh shell that Herdr put in place of the lost program?"""
+        if known := self.labels.get(SHELL_LABEL):
+            return str(self.pid) != known
+        return _AGENT_SCRIPT not in self.argv
+
+    @property
+    def place(self) -> AgentPlace:
+        if not self.live:
+            return AgentPlace.CLOSED
+        if self.has_claude:
+            return AgentPlace.ALIVE
+        if self.replaced:
+            return AgentPlace.LOST
+        if self.is_bare_shell or (self.reported and not self.has_status):
+            return AgentPlace.EXITED
+        return AgentPlace.UNKNOWN
+
+    def agent(self) -> Agent:
+        place = self.place
+        # A terminal can still show the last state after Claude Code ended.
+        state = self.state if place is AgentPlace.ALIVE else AgentState.NONE
+        return Agent(place, state, self.turn, self.kind)
+
+
+_SHELLS = frozenset({"zsh", "bash", "sh", "fish", "nu"})
 
 
 class Herdr:
@@ -32,6 +112,149 @@ class Herdr:
     def version(self) -> str:
         """The running core's version. ``hc`` starts the core if it is not running."""
         return str(self._hc("server", "status", "--json").get("version", ""))
+
+    # --- reading ----------------------------------------------------------------------
+
+    def get(self, address: str) -> Terminal | None:
+        try:
+            return _terminal(self._hc("get", address, "--json"))
+        except HerdrError as e:
+            if e.kind == "not_found":
+                return None
+            raise
+
+    def terminals(self, *labels: str, finished: bool = False) -> list[Terminal]:
+        """The terminals that carry all these ``key=value`` labels, oldest first."""
+        args = ["ls", "--json"]
+        if finished:
+            args.append("--all")
+        for label in labels:
+            args += ["--label", label]
+        listed = self._hc(*args).get("terminals", [])
+        found = [self.get(entry["address"]) for entry in listed]
+        return [t for t in found if t is not None]
+
+    def run_terminal(self, run_id: str) -> Terminal | None:
+        """The terminal of a run. The label decides, not a stored address."""
+        found = self.terminals(f"{RUN_LABEL}={run_id}", finished=True)
+        return max(found, key=lambda t: (t.has_claude, t.live), default=None)
+
+    def screen(self, address: str) -> str:
+        return str(self._hc("read", address, "--json").get("text", ""))
+
+    # --- starting ---------------------------------------------------------------------
+
+    def start_agent(
+        self,
+        *,
+        cwd: Path,
+        space: str,
+        tab: str,
+        run_id: str,
+        ticket: str,
+        claude_args: Sequence[str],
+    ) -> Terminal:
+        """Start Claude Code inside a shell that stays open after it.
+
+        Its arguments are passed as arguments, so no shell interprets them.
+        """
+        address = self._hc(
+            "run", "--json", "--bg", "--keep", "--no-parent", "--cwd", str(cwd),
+            "--label", f"{SPACE_LABEL}={space}", "--label", f"{TAB_LABEL}={tab}",
+            "--label", f"{RUN_LABEL}={run_id}", "--label", f"{TICKET_LABEL}={ticket}",
+            "--", SHELL, "-l", "-i", "-c", _AGENT_SCRIPT, "nightshift", *claude_args,
+        )["address"]  # fmt: skip
+        terminal = self.get(address)
+        if terminal is None:
+            raise HerdrError("the terminal was gone right after it started", "spawn_failed")
+        return terminal
+
+    def mark_shell(self, terminal: Terminal) -> None:
+        """Remember the shell, to tell it from one that replaces it after a crash."""
+        if terminal.pid is not None:
+            self._hc("label", terminal.address, f"{SHELL_LABEL}={terminal.pid}", "--json")
+
+    def ensure_repo_space(self, clone: Path) -> str | None:
+        """Make the space on a clone if there is none. Returns a new space's ID."""
+        wanted = clone.resolve()
+        for entry in self._hc("ls", "--json").get("terminals", []):
+            if Path(entry.get("cwd", "/")).resolve() == wanted:
+                terminal = self.get(entry["address"])
+                if terminal is not None and terminal.live and SPACE_LABEL in terminal.labels:
+                    return None
+        space = new_id("sp")
+        self._hc(
+            "run", "--json", "--bg", "--keep", "--no-parent", "--cwd", str(clone),
+            "--label", f"{SPACE_LABEL}={space}", "--label", f"{TAB_LABEL}={new_id('tb')}",
+        )  # fmt: skip
+        return space
+
+    def wait_for_claude(
+        self, address: str, sleep: Callable[[float], None], seconds: int = 30
+    ) -> bool:
+        for _ in range(seconds * 2):
+            terminal = self.get(address)
+            if terminal is None or not terminal.live:
+                return False
+            if terminal.has_claude:
+                return True
+            sleep(0.5)
+        return False
+
+    # --- acting -----------------------------------------------------------------------
+
+    def send(self, address: str, text: str) -> None:
+        self._hc("send", address, text, "--json")
+
+    def name_tab(self, tab: str, name: str) -> bool:
+        """Name a tab that still has its default name. False: try again later."""
+        try:
+            listed = self._run(["herdr-app", "ls"], timeout=10)
+            if listed.code != 0:
+                return False
+            tabs = [t for s in json.loads(listed.out)["spaces"] for t in s["tabs"]]
+            found = next((t for t in tabs if t["id"] == tab), None)
+            if found is None:
+                return False
+            if found["name"] != "1":
+                return True
+            renamed = self._run(
+                ["herdr-app", "do", "tab.rename", "--id", tab, "--name", name], timeout=10
+            )
+            return renamed.code == 0
+        except ToolError, ValueError, KeyError, TypeError:
+            return False
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}{uuid4().hex}"
+
+
+def _terminal(data: dict[str, Any]) -> Terminal:
+    status = data.get("status") or {}
+    foreground = data.get("foreground") or {}
+    try:
+        state = AgentState(status.get("state", "none"))
+    except ValueError:
+        state = AgentState.NONE
+    return Terminal(
+        address=data["address"],
+        live=data.get("state") == "live",
+        argv=tuple(data.get("argv") or ()),
+        cwd=data.get("cwd") or "",
+        labels=dict(data.get("labels") or {}),
+        pid=data.get("pid"),
+        turn=data.get("turn") or 0,
+        reason=data.get("reason") or "",
+        reported=bool(data.get("reported")),
+        state=state,
+        has_status=bool(status),
+        kind=status.get("kind") or "",
+        fg_name=foreground.get("name") or "",
+        fg_argv=tuple(foreground.get("argv") or ()),
+        fg_cwd=foreground.get("cwd") or "",
+        fg_pid=foreground.get("pid"),
+    )
 
 
 def is_supported(version: str) -> bool:

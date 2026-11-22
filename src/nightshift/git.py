@@ -39,3 +39,44 @@ class Git:
     def origin(self, path: Path) -> str | None:
         result = self._git(path, "remote", "get-url", "origin")
         return result.out.strip() or None if result.code == 0 else None
+
+    # --- creating ---------------------------------------------------------------------
+
+    def fetch(self, clone: Path) -> None:
+        self._ok(clone, "fetch", "--quiet", "origin", timeout=300)
+
+    def branch_exists(self, clone: Path, branch: str) -> bool:
+        """Locally, or on GitHub as of the last fetch or right now."""
+        if self._tip(clone, f"refs/heads/{branch}") or self._tip(
+            clone, f"refs/remotes/origin/{branch}"
+        ):
+            return True
+        return bool(self._ok(clone, "ls-remote", "--heads", "origin", f"refs/heads/{branch}"))
+
+    def add_worktree(self, clone: Path, path: Path, branch: str, default_branch: str) -> None:
+        """Make the worktree on its new branch. Does nothing if it is there already."""
+        if (path / ".git").exists() and self.worktree_branch(path) == branch:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._git(clone, "worktree", "prune")
+        if self._tip(clone, f"refs/heads/{branch}"):  # made before a crash
+            self._ok(clone, "worktree", "add", "--quiet", str(path), branch, timeout=600)
+        else:
+            self._ok(
+                clone, "worktree", "add", "--quiet", "--no-track", "-b", branch, str(path),
+                f"refs/remotes/origin/{default_branch}", timeout=600,
+            )  # fmt: skip
+
+    def worktree_branch(self, worktree: Path) -> str | None:
+        """The checked-out branch, or None on a detached HEAD."""
+        result = self._git(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
+        return result.out.strip() if result.code == 0 else None
+
+    def repair(self, clone: Path, worktrees: list[Path]) -> None:
+        """Make worktrees point at a clone that was moved."""
+        if existing := [str(w) for w in worktrees if w.is_dir()]:
+            self._git(clone, "worktree", "repair", *existing)
+
+    def _tip(self, cwd: Path, ref: str) -> str | None:
+        result = self._git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        return result.out.strip() if result.code == 0 else None

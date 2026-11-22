@@ -1,6 +1,8 @@
 """Puts the boundaries together for the CLI."""
 
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -11,9 +13,15 @@ from nightshift.claude import Claude
 from nightshift.config import Settings
 from nightshift.conventions import LABELS
 from nightshift.errors import ToolError, TrackerAuthError
+from nightshift.executor import Executor
 from nightshift.git import Git
 from nightshift.herdr import Herdr
+from nightshift.loop import Loop, Stop
 from nightshift.model import RepoInfo
+from nightshift.notify import Notifier
+from nightshift.observe import Observer
+from nightshift.project_config import Paths, ProjectConfig
+from nightshift.store import Store
 from nightshift.tracker.github import GitHub
 
 
@@ -37,6 +45,7 @@ class Boundaries:
     herdr: Herdr
     claude: Claude
     git: Git
+    notifier: Notifier
 
     @property
     def checks(self) -> Checks:
@@ -56,4 +65,49 @@ def build(
         herdr=Herdr(run),
         claude=Claude(run, home or Path.home()),
         git=Git(run),
+        notifier=Notifier(run),
     )
+
+
+def build_loop(
+    boundaries: Boundaries, config: ProjectConfig, store: Store, paths: Paths, stop: Stop
+) -> Loop:
+    def now() -> datetime:
+        return datetime.now(UTC)
+
+    observer = Observer(
+        config=config,
+        store=store,
+        tracker=boundaries.tracker,
+        herdr=boundaries.herdr,
+        claude=boundaries.claude,
+        git=boundaries.git,
+        now=now,
+        monotonic=time.monotonic,
+    )
+    executor = Executor(
+        store=store,
+        tracker=boundaries.tracker,
+        herdr=boundaries.herdr,
+        git=boundaries.git,
+        notifier=boundaries.notifier,
+        paths=paths,
+        repos=observer.repo,
+        now=now,
+        sleep=time.sleep,
+    )
+    return Loop(store=store, observer=observer, executor=executor, stop=stop, now=now)
+
+
+def follow_clone(git: Git, store: Store, repo_ref: str, path: Path) -> None:
+    """If the clone was moved, point its runs and their worktrees at the new place."""
+    moved = [
+        run
+        for run in store.runs()
+        if run.repo_ref == repo_ref and Path(run.clone_path) != path and not run.cleaned_up_at
+    ]
+    if not moved:
+        return
+    git.repair(path, [Path(run.worktree_path) for run in moved if run.worktree_path])
+    for run in moved:
+        store.update_run(run, clone_path=str(path))

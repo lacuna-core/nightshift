@@ -187,6 +187,23 @@ class TicketFacts:
         return None
 
 
+@dataclass(frozen=True)
+class Brief:
+    """What the agent is told about its ticket."""
+
+    repo: str
+    ticket_id: str
+    title: str
+    body: str
+    url: str
+    labels: tuple[str, ...]
+    comments: tuple[tuple[str, str], ...]
+    """Author and text, only of people with write access."""
+
+    closing_line: str
+    """The line in the PR that links it to the ticket."""
+
+
 # --- what is read from Herdr and Claude Code ----------------------------------------------
 
 
@@ -262,6 +279,12 @@ class RunView:
 
     agent: Agent = UNKNOWN_AGENT
     streaks: Streaks = Streaks()
+    elapsed: float = 0
+    """Seconds since the last poll, 0 if it was too long ago to count."""
+
+    active: bool = False
+    """Its state, turn or screen changed since the last poll."""
+
     cleanup: Cleanup | None = None
     stall_timeout: timedelta = timedelta(minutes=20)
     max_run_time: timedelta = timedelta(hours=3)
@@ -354,6 +377,13 @@ class Update:
 
 
 @dataclass(frozen=True)
+class NameTab:
+    """Name the agent's tab, if the Herdr window is open."""
+
+    run: Run
+
+
+@dataclass(frozen=True)
 class Flag:
     """Label a ticket without a run as needing you, and say why."""
 
@@ -369,4 +399,4 @@ class Unflag:
     key: str
 
 
-Action = Pick | Claim | Drop | Provision | Complete | Update | Flag | Unflag
+Action = Pick | Claim | Drop | Provision | Complete | Update | NameTab | Flag | Unflag
