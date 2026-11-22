@@ -31,7 +31,7 @@ def run(args: Sequence[str], *, cwd: Path | None = None, timeout: float = 60) ->
     """
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env["LC_ALL"] = "C"
+    env["LC_ALL"] = "C.UTF-8"
     try:
         done = subprocess.run(
             list(args),

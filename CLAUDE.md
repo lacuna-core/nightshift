@@ -1,7 +1,11 @@
 # CLAUDE.md
 
-TODO: one paragraph on what Nightshift is and does, for whoever (or whatever) opens this repo
-first: the problem it solves, who uses it, and its main moving parts.
+Nightshift is a personal software factory for one macOS machine. It polls GitHub Project boards,
+takes the highest-ranked `Todo` ticket that has the `nightshift` label, and gives it to a Claude
+Code agent in its own git worktree, shown in Herdr. When the agent has opened a pull request,
+Nightshift moves the ticket to In Review; when it cannot go on, it flags the ticket as needing a
+person. The product spec is `docs/specs/2026-11-21-initial.md`; FR and NFR numbers in the code
+refer to it.
 
 ## Commands
 
@@ -30,12 +34,31 @@ every shell, including CI and agent shells.
 
 ## Project structure
 
-`src/nightshift/` follows a layered structure:
+`src/nightshift/` is one loop around one pure function: **observe, decide, act**.
 
+- **`cli/`** — the commands, thin: `setup.py` (`init`, `check`), `operate.py` (`start`, `stop`, `status`), `render.py`. Registered in `app.py`.
+- **`loop.py`** — polling, backing off, stopping; `lock.py` is the single-instance lock, `logs.py` the log file.
+- **`observe.py`** — reads GitHub, git, Herdr and the database into one `Snapshot`.
+- **`decide.py`** — the pure function `Snapshot` → actions. Every rule about tickets, runs and agents belongs here. No I/O.
+- **`executor.py`** — carries out actions. Every step is safe to repeat after a crash. It re-reads a ticket right before changing it.
+- **`cleanup.py`** — whether a worktree is safe to remove (FR-13).
+- **`model.py`** — runs, tickets, snapshots and actions as plain data; `conventions.py` the fixed names and times (NFR-2); `naming.py` branch names.
+- **`store.py`** — SQLite: runs, and `loop_state` for what `status` shows and the outbox.
+- **Boundaries**, one module each: `tracker/github.py`, `herdr.py` (`hc`), `git.py`, `claude.py`, `notify.py`; `proc.py` runs the tools. `wiring.py` puts them together.
+- **`checks.py`** — the checks of `init`, `check` and `start`; `project_config.py` is `nightshift.yaml` and the paths under `~/.nightshift`.
 - **`config.py`** — frozen `Settings` (pydantic-settings, `NIGHTSHIFT_` env prefix). Calls `load_dotenv()` at import time.
-- **`cli/app.py`** — Typer CLI. Sub-command groups live in separate files (e.g. `cli/foo.py`) and are registered via `app.add_typer(...)`.
 
-Logging is configured once in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
+Rules that keep it safe:
+
+- Nothing is concluded from what could not be read: an unreadable ticket, board or terminal changes nothing.
+- A state change and what it must tell GitHub (labels, comments) or you are written in one transaction (`Executor._to`); the outbox delivers them afterwards, each comment once.
+- Names and IDs are recorded before the thing is created, so a repeated step finds it.
+- Anything that closes or removes something goes through `Cleanup.check`; git is never forced.
+- Nothing outside `tracker/` may assume that a ticket ID is a number.
+
+Tests: `tests/build.py` builds plain data for `decide`; `tests/world.py` is a whole world (GitHub and Herdr faked, git real, a clock that tests move) that also kills Nightshift at chosen points. Git is never mocked.
+
+Logging is first configured in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. `start` replaces it with stdout plus `~/.nightshift/logs/nightshift.log`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
 
 `docs/decisions.md` is the decision log (see below).
 
@@ -59,7 +82,7 @@ and `README.md`; change them together.
 
 ### Scopes for this project (pick the closest match)
 
-- TODO: e.g. backend, frontend, database
+- cli, loop, decide, executor, cleanup, store, tracker, herdr, git, claude, config
 
 ### Rules
 

@@ -130,3 +130,29 @@ nested lists.
 
 **Consequences:** The usual library, with type stubs and no surprises. It does not keep
 comments, so running `init` again drops the ones added by hand.
+
+## 2026-11-22 — What GitHub must be told goes through an outbox
+
+**Context:** A run that fails must also be labelled, commented on and notified about. A crash
+or an outage between those steps would lose the signal, and repeating them would double it.
+
+**Decision:** The state change and its labels, comments and notifications are written in one
+database transaction, and delivered afterwards until they succeed. Each comment carries a mark
+by which a repeated one is recognized. Status changes are not delivered this way: they happen
+before the state change, after the ticket was read again.
+
+**Consequences:** No signal is lost or doubled, and an outage only delays it. An undeliverable
+comment holds back the later ones of its run, which `status` shows. A notification may be shown
+twice if Nightshift is killed right after it.
+
+## 2026-11-22 — Cleanup only reports in its first week, by itself
+
+**Context:** Removing a worktree wrongly is the worst thing Nightshift can do. The spec asks for
+a week of report-only on real repos before it may remove anything.
+
+**Decision:** The week is built in. It starts with the first worktree that could be removed on a
+machine, and ends without anyone having to change anything.
+
+**Consequences:** No setting to remember, and every new machine gets the same trial. Worktrees
+pile up for a week and then go on the first poll after it. Pull requests are closed on starting
+over from the first day, because that can be undone.

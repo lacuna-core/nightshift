@@ -2,7 +2,7 @@
 name = "nightshift"
 # A placeholder, never bumped: releases are numbered by the Release workflow (git tags).
 version = "0.1.0"
-description = "TODO: project description"
+description = "A personal software factory: hands ready GitHub tickets to Claude Code agents"
 authors = [
     { name = "Lacuna", email = "lacuna.core@gmail.com" }
 ]
