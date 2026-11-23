@@ -18,6 +18,7 @@ class Notifier:
 
     def send(self, title: str, text: str) -> None:
         """Show a notification. One that cannot be shown never holds anything up."""
+        logger.info("notification: {}: {}", title, text)
         script = [part for line in _SCRIPT for part in ("-e", line)]
         try:
             result = self._run(["osascript", *script, title, text], timeout=10)

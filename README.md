@@ -85,6 +85,11 @@ uv run pytest tests/cli/             # single directory
 uv run pytest -k test_version        # single test
 ```
 
+### Trying it on the sandbox
+
+`scripts/sandbox.py <folder> <command>` runs the CLI with its files in `<folder>` instead of
+`~/.nightshift`. The sandbox repo and board, and the rules for using them, are in `CLAUDE.md`.
+
 ### Lint and type-check
 
 ```bash

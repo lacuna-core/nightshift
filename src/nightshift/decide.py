@@ -59,6 +59,7 @@ from nightshift.model import (
     UsageLimit,
     Wait,
 )
+from nightshift.project_config import format_duration
 
 GONE = frozenset({AgentPlace.EXITED, AgentPlace.LOST, AgentPlace.CLOSED})
 STOPPED = frozenset({AgentState.IDLE, AgentState.DONE})
@@ -283,7 +284,7 @@ def _alive(view: RunView) -> Iterator[Action]:
         minutes = int(_seconds(view.stall_timeout) // 60)
         yield _failed(view, f"The agent showed no activity for more than {minutes} minutes.")
     elif run.active_seconds > _seconds(view.max_run_time):
-        yield _failed(view, f"The run took longer than {view.max_run_time}.")
+        yield _failed(view, f"The run took longer than {format_duration(view.max_run_time)}.")
 
 
 def _seconds(duration: timedelta) -> float:

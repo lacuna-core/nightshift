@@ -62,6 +62,25 @@ Logging is first configured in `__init__.py`: loguru handler removed and re-adde
 
 `docs/design.md` is the high-level design, with diagrams: read it first. `docs/decisions.md` is the decision log (see below).
 
+## Testing on the sandbox
+
+Tests with the real GitHub, Herdr and Claude Code use only these, which hold nothing of value:
+
+- Repo: https://github.com/lacuna-core/nightshift-sandbox (private)
+- Board: https://github.com/users/lacuna-core/projects/8 (private, "Nightshift sandbox")
+
+Never point a test at another repo or board, and never at `~/.nightshift`:
+
+- Clone the sandbox repo into `/temp/` (gitignored) or a scratch folder, and run `claude` in the clone once to accept the trust dialog.
+- Run the CLI through `scripts/sandbox.py <folder> <command>`. Its config, database, logs and worktrees then live in `<folder>`.
+- Create test issues with the `nightshift` label and add them to the board, e.g. `gh project item-add 8 --owner lacuna-core --url <issue-url>`.
+- `gh` needs the `project` scope: `gh auth refresh -h github.com -s project`, in a normal terminal.
+- Agents use your Claude subscription. Keep test tickets small; the sandbox's `CLAUDE.md` asks for minimal work.
+- Herdr: watch the agents in its window. Never restart or stop the core (`hc server ...`): it holds every terminal on the machine. To crash one, start a separate core with its own `HC_SESSION` and XDG folders under `/temp/`.
+- Afterwards: stop the loop, close the issues and PRs you opened, and end only the terminals the test started (their folder is under your scratch folder).
+
+A milestone's "done when" that says "on the sandbox" is met only by a run there, not by the fakes in `tests/`.
+
 ## Commit Message Convention
 
 This project follows **Conventional Commits** (https://www.conventionalcommits.org).

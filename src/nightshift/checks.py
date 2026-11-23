@@ -9,6 +9,7 @@ from nightshift.claude import Claude
 from nightshift.conventions import HERDR_TESTED, LABELS, REQUIRED_STATUSES
 from nightshift.errors import (
     NightshiftError,
+    ToolError,
     TrackerAuthError,
     TrackerNotFoundError,
     TrackerUnavailableError,
@@ -143,8 +144,12 @@ class Checks:
             login, scopes = self._tracker.login()
         except TrackerUnavailableError as e:
             return Finding(Level.WARN, f"GitHub: {e}", "Try again later."), False
+        except ToolError as e:
+            return Finding(Level.FAIL, f"GitHub: {e}", "Install the GitHub CLI, `gh`."), True
         except NightshiftError as e:
-            return Finding(Level.FAIL, f"GitHub: {e}", "Run `gh auth login -s project`."), True
+            return Finding(
+                Level.FAIL, f"GitHub: {e}", "Run `gh auth login -h github.com -s project`."
+            ), True
         if scopes is not None and not {"project", "repo"} <= scopes:
             missing = ", ".join(sorted({"project", "repo"} - scopes))
             return (
