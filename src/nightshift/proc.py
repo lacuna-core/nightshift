@@ -9,6 +9,8 @@ from typing import Protocol
 
 from nightshift.errors import ToolError
 
+_CALLER = ("CLAUDE", "HC_TERMINAL_", "HC_SCOPE")
+
 
 @dataclass(frozen=True)
 class Result:
@@ -27,9 +29,10 @@ def run(args: Sequence[str], *, cwd: Path | None = None, timeout: float = 60) ->
     """Run a tool to its end and return what it wrote, whatever its exit code.
 
     It gets its own session, so that Ctrl-C in the loop's terminal reaches only Nightshift
-    and never stops a tool halfway.
+    and never stops a tool halfway. It does not learn that Nightshift may run inside Herdr or
+    Claude Code: ``hc send`` would mark its text as coming from that terminal.
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(_CALLER)}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["LC_ALL"] = "C.UTF-8"
     try:

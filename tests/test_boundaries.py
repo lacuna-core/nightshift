@@ -32,6 +32,16 @@ def test_gh_token() -> None:
         gh_token(FakeRunner({"gh auth token": Result(1, "", "no")}))
 
 
+def test_tools_do_not_learn_who_called_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE", "CLAUDECODE"):
+        monkeypatch.setenv(name, "x")
+    monkeypatch.setenv("HC_SESSION", "kept")
+    out = proc.run(["env"]).out
+    assert "HC_SESSION=kept" in out
+    for name in ("HC_TERMINAL", "HC_SCOPE", "CLAUDECODE"):
+        assert name not in out
+
+
 def test_run() -> None:
     assert proc.run(["sh", "-c", "echo hi; exit 3"]).code == 3
     with pytest.raises(ToolError, match="not found"):
