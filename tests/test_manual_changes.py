@@ -111,6 +111,16 @@ def test_taken_over_run_is_not_helped_along(world: World, issue: Issue) -> None:
     assert issue.status[BOARD] == "In Progress"
 
 
+def test_taken_over_agent_is_interrupted_until_it_stops(world: World, issue: Issue) -> None:
+    world.hc.sticky_interrupt = True
+    world.unlabel(issue)
+    world.tick(3)
+    assert not stopped(world)
+    world.hc.sticky_interrupt = False
+    world.tick()
+    assert stopped(world)
+
+
 def test_merged_lets_the_agent_finish_its_turn(world: World, issue: Issue) -> None:
     world.open_pr(issue)
     world.set_pr(issue, "merged")

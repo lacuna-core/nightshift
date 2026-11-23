@@ -57,6 +57,16 @@ def test_lost_agent_is_resumed_once(world: World) -> None:
     assert "second time" in (world.run().state_reason or "")
 
 
+def test_resume_is_typed_again_if_the_shell_took_it_as_an_answer(world: World) -> None:
+    started(world)
+    world.hc.reboot()
+    world.hc.shell_asks = True
+    world.tick(2)
+    assert len(world.terminal()["sent"]) == 2
+    world.tick(3)
+    assert world.state() is RunState.RUNNING
+
+
 def test_resumed_agent_that_exits_fails(world: World) -> None:
     started(world)
     world.hc.reboot()

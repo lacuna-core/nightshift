@@ -238,6 +238,8 @@ def _live(view: RunView) -> Iterator[Action]:
                 yield from _gone(view)
             elif view.agent.place is AgentPlace.ALIVE:
                 yield from _alive(view)
+            elif view.agent.place is AgentPlace.STARTING:
+                yield from _starting(view)
 
 
 def claimed(view: RunView) -> Action:
@@ -252,6 +254,16 @@ def claimed(view: RunView) -> Action:
     if ticket.presence is not Presence.ON or ticket.transferred:
         return Drop(run, "the ticket is not on the board")
     return Claim(run)
+
+
+def _starting(view: RunView) -> Iterator[Action]:
+    slow = view.streaks.silent_seconds >= _seconds(NO_STATE_NEEDS_YOU)
+    if slow and view.run.state is not RunState.WAITING:
+        yield Wait(
+            view.run,
+            f"waiting-start-{view.run.resume_count}",
+            "Claude Code has not started. The shell in its tab may be asking something first.",
+        )
 
 
 def _alive(view: RunView) -> Iterator[Action]:
@@ -312,15 +324,18 @@ def _needs_you(view: RunView) -> str | None:
 def _stopping(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     """Repeat an interrupt until the agent stopped, but never after a new turn (FR-12)."""
     run, agent = view.run, view.agent
-    if run.stop_requested_at is None or agent.place is AgentPlace.UNKNOWN:
+    since = run.stop_requested_at
+    if since is None or agent.place is AgentPlace.UNKNOWN:
         return
     busy = agent.place is AgentPlace.ALIVE and agent.state in (
         AgentState.WORKING,
         AgentState.BLOCKED,
     )
-    if not busy or agent.turn != run.turn_at_end:
+    if agent.place is AgentPlace.STARTING and snapshot.now - since <= GIVE_UP_STOPPING:
+        return  # to be stopped once it starts
+    if (not busy and agent.place is not AgentPlace.STARTING) or agent.turn != run.turn_at_end:
         yield Update(run, {"stop_requested_at": None, "turn_at_end": agent.turn})
-    elif snapshot.now - run.stop_requested_at > GIVE_UP_STOPPING:
+    elif snapshot.now - since > GIVE_UP_STOPPING:
         yield GiveUpStopping(run)
     else:
         yield Interrupt(run)

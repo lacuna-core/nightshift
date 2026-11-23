@@ -72,11 +72,11 @@ def test_resumed_agent_that_exited_is_not_lost_again() -> None:
     assert exited.place is AgentPlace.EXITED
 
 
-def test_still_starting_is_unknown() -> None:
+def test_still_starting() -> None:
     starting = {"argv": OURS[:5], "cwd": "/wt", "name": "zsh", "pid": 60831}
     terminal = recorded(foreground=starting, status=None, reported=False)
-    assert terminal.place is AgentPlace.UNKNOWN
-    assert recorded(foreground=None, status=None, reported=False).place is AgentPlace.UNKNOWN
+    assert terminal.place is AgentPlace.STARTING
+    assert recorded(foreground=None, status=None, reported=False).place is AgentPlace.STARTING
 
 
 def test_closed() -> None:

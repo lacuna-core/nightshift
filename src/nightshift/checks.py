@@ -151,7 +151,7 @@ class Checks:
                 Finding(
                     Level.FAIL,
                     f"GitHub: the login of {login} lacks the scope {missing}",
-                    "Run `gh auth refresh -s project,repo`.",
+                    "Run `gh auth refresh -h github.com -s project,repo`.",
                 ),
                 True,
             )
@@ -252,7 +252,8 @@ class Checks:
             overview = self._tracker.board_overview(url)
         except TrackerAuthError as e:
             return BoardReport(
-                url, (Finding(Level.FAIL, str(e), "Run `gh auth refresh -s project`."),)
+                url,
+                (Finding(Level.FAIL, str(e), "Run `gh auth refresh -h github.com -s project`."),),
             )
         except NightshiftError as e:
             return BoardReport(

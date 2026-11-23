@@ -198,6 +198,7 @@ class FakeHerdr:
         self.calls: list[str] = []
         self.sticky_interrupt = False
         self.elsewhere: list[str] = []
+        self.shell_asks = False
         self.before: Callable[[str], None] = lambda what: None
 
     def __call__(
@@ -276,7 +277,10 @@ class FakeHerdr:
         self.terminals[address] = terminal
         if RUN_LABEL in labels:
             self.starts.append(argv)
-            self.launch(terminal)
+            if self.shell_asks:
+                terminal["foreground"] |= {"argv": argv}
+            else:
+                self.launch(terminal)
         return {"address": address}
 
     def _label(self, args: list[str]) -> Any:
@@ -292,7 +296,9 @@ class FakeHerdr:
         if (terminal["status"] or {}).get("state") == "blocked":
             return Result(9, "", json.dumps({"error": {"kind": "blocked", "message": "blocked"}}))
         terminal.setdefault("sent", []).append(args[1])
-        if args[1].startswith("claude "):
+        if self.shell_asks:
+            self.shell_asks = False  # the line was taken as the answer
+        elif args[1].startswith("claude "):
             self.launch(terminal)
             if "continue" not in args[1]:
                 self.set_state(terminal, "idle")

@@ -441,11 +441,15 @@ class Executor:
             return
         run = self._store.update_run(run, resume_count=run.resume_count + 1)
         logger.info("resuming the lost agent")
-        self._herdr.send(
-            terminal.address, claude_code.resume_line(run.claude_session_id or "", message)
-        )
+        line = claude_code.resume_line(run.claude_session_id or "", message)
+        self._herdr.send(terminal.address, line)
+        if not self._herdr.wait_for_claude(terminal.address, self._sleep):
+            # The shell may have asked something first, which took the line as its answer.
+            again = self._herdr.get(terminal.address)
+            if again is not None and again.is_bare_shell:
+                self._herdr.send(terminal.address, line)
+                self._herdr.wait_for_claude(terminal.address, self._sleep)
         self._herdr.mark_shell(terminal)
-        self._herdr.wait_for_claude(terminal.address, self._sleep)
 
     def _wait(self, run: Run, event: str, reason: str) -> None:
         if run.state is RunState.WAITING:
@@ -464,9 +468,9 @@ class Executor:
         if not run.live:
             return
         agent = self._agent(run)
-        busy = agent.place is AgentPlace.ALIVE and agent.state in (
-            AgentState.WORKING,
-            AgentState.BLOCKED,
+        busy = agent.place is AgentPlace.STARTING or (
+            agent.place is AgentPlace.ALIVE
+            and agent.state in (AgentState.WORKING, AgentState.BLOCKED)
         )
         # The turn is recorded first: only that one may be interrupted, not a later one.
         run = self._store.update_run(
@@ -594,7 +598,7 @@ class Executor:
         terminal = self._herdr.run_terminal(run.id)
         if terminal is None or not terminal.live:
             return
-        if terminal.place is AgentPlace.UNKNOWN:
+        if terminal.place is AgentPlace.STARTING:
             raise NightshiftError("the agent is still starting, so it cannot be ended yet")
         if not terminal.has_claude:
             return

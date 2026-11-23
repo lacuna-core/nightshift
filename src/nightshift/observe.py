@@ -106,7 +106,7 @@ def advance(
         if working and not active and agent.limit is None
         else 0,
         silent_seconds=before.silent_seconds + elapsed
-        if alive and agent.state is AgentState.NONE
+        if (alive and agent.state is AgentState.NONE) or agent.place is AgentPlace.STARTING
         else 0,
     )
 
@@ -258,6 +258,7 @@ class Observer:
             and (
                 run.state in LIVE
                 or run.state is RunState.RESETTING
+                or run.stop_requested_at is not None
                 or run.ticket_ref in shown
                 or (run.cleaned_up_at is None and not run.taken_over)
             )

@@ -220,8 +220,12 @@ class AgentPlace(StrEnum):
     CLOSED = "closed"
     """The terminal is gone."""
 
+    STARTING = "starting"
+    """The terminal is there, and Claude Code has not started yet. Its shell may be asking
+    something first, such as whether to update."""
+
     UNKNOWN = "unknown"
-    """Herdr could not be asked, or the agent is still starting."""
+    """Herdr could not be asked."""
 
 
 class AgentState(StrEnum):

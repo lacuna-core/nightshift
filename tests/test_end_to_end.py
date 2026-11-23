@@ -49,6 +49,8 @@ def test_how_the_agent_is_started(world: World) -> None:
     world.issue(title="Danger $(rm -rf /) `x` \"y\" 'z'")
     world.tick()
     argv = world.hc.starts[0]
+    assert argv[:2] == ["/usr/bin/env", "DISABLE_AUTO_UPDATE=true"]
+    argv = argv[2:]
     assert argv[:4] == ["/bin/zsh", "-l", "-i", "-c"]
     assert argv[4] == 'claude "$@"; exec /bin/zsh -l -i'
     assert argv[6:8] == ["--permission-mode", "acceptEdits"]

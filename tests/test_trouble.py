@@ -84,6 +84,45 @@ def test_trust_dialog_needs_you(world: World, issue: Issue) -> None:
     one_signal(world, issue, "waiting")
 
 
+def stuck_start(tmp_path: Path) -> tuple[World, Issue]:
+    world = World(tmp_path)
+    world.hc.shell_asks = True
+    issue = world.issue()
+    world.tick(5)
+    return world, issue
+
+
+def test_shell_that_asks_before_claude_starts_needs_you(tmp_path: Path) -> None:
+    world, issue = stuck_start(tmp_path)
+    assert world.state() is RunState.WAITING
+    one_signal(world, issue, "waiting")
+    world.hc.launch(world.terminal())
+    world.tick()
+    assert world.state() is RunState.RUNNING
+    assert NEEDS_HUMAN not in issue.labels
+
+
+def test_agent_that_starts_after_its_run_ended_is_stopped(tmp_path: Path) -> None:
+    world, issue = stuck_start(tmp_path)
+    world.unlabel(issue)
+    world.tick(2)
+    assert world.state() is RunState.CANCELLED
+    world.hc.launch(world.terminal())
+    world.tick()
+    assert world.terminal()["status"]["state"] == "idle"
+
+
+def test_start_over_waits_until_the_agent_can_be_ended(tmp_path: Path) -> None:
+    world, issue = stuck_start(tmp_path)
+    world.tick()
+    world.move(issue, "Todo")
+    world.tick(2)
+    assert world.state() is RunState.RESETTING
+    world.hc.launch(world.terminal())
+    world.tick(2)
+    assert [r.state for r in world.store.runs()] == [RunState.DISCARDED, RunState.RUNNING]
+
+
 def test_answered_agent_goes_on(world: World, issue: Issue) -> None:
     world.agent("blocked", kind="question")
     world.tick()

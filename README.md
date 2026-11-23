@@ -11,7 +11,7 @@ comment saying why.
 ## Requirements
 
 - macOS, with [uv](https://docs.astral.sh/uv/), git and [gh](https://cli.github.com/)
-- `gh` logged in with the `project` scope: `gh auth refresh -s project`
+- `gh` logged in with the `project` scope: `gh auth refresh -h github.com -s project`
 - [herdr-app](https://github.com/herdrdev/herdr-app) with herdr-core 0.1.18 or a later 0.1 (`hc`
   on `PATH`)
 - [Claude Code](https://claude.com/claude-code), logged in

@@ -19,6 +19,8 @@ TICKET_LABEL = "nightshift.ticket"
 SHELL_LABEL = "nightshift.shell"
 SPACE_LABEL = "herdr.space"
 TAB_LABEL = "herdr.tab"
+# Oh My Zsh would ask whether to update, and the agent would never start.
+_QUIET = ("DISABLE_AUTO_UPDATE=true",)
 _AGENT_SCRIPT = f'claude "$@"; exec {SHELL} -l -i'
 
 
@@ -77,7 +79,7 @@ class Terminal:
             return AgentPlace.LOST
         if self.is_bare_shell or (self.reported and not self.has_status):
             return AgentPlace.EXITED
-        return AgentPlace.UNKNOWN
+        return AgentPlace.STARTING
 
     def agent(self) -> Agent:
         place = self.place
@@ -162,7 +164,7 @@ class Herdr:
             "run", "--json", "--bg", "--keep", "--no-parent", "--cwd", str(cwd),
             "--label", f"{SPACE_LABEL}={space}", "--label", f"{TAB_LABEL}={tab}",
             "--label", f"{RUN_LABEL}={run_id}", "--label", f"{TICKET_LABEL}={ticket}",
-            "--", SHELL, "-l", "-i", "-c", _AGENT_SCRIPT, "nightshift", *claude_args,
+            "--", "/usr/bin/env", *_QUIET, SHELL, "-l", "-i", "-c", _AGENT_SCRIPT, "nightshift", *claude_args,
         )["address"]  # fmt: skip
         terminal = self.get(address)
         if terminal is None:
