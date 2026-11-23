@@ -22,7 +22,7 @@ def check() -> None:
     from nightshift.errors import ConfigError
     from nightshift.project_config import Paths, load_config
 
-    path = Paths.default().config
+    path = Paths.of(SETTINGS.home).config
     try:
         config = load_config(path)
     except ConfigError as e:
@@ -44,7 +44,7 @@ def init(
     from nightshift.errors import ConfigError, NightshiftError
     from nightshift.project_config import Paths, load_config, save_config
 
-    path = Paths.default().config
+    path = Paths.of(SETTINGS.home).config
     current: ProjectConfig | None = None
     if path.exists():
         try:
@@ -57,6 +57,7 @@ def init(
     if path.exists() and not yes:
         typer.confirm(f"Rewrite {path}?", abort=True)
     save_config(config, path)
+    boundaries.homes.record()
     console.print(f"Wrote {escape(str(path))}")
 
     result = boundaries.checks.run(config)

@@ -45,6 +45,11 @@ repos:
 Changes take effect when Nightshift restarts. `NIGHTSHIFT_LOG_LEVEL` (default `INFO`) sets the
 log level.
 
+`NIGHTSHIFT_HOME` (default `~/.nightshift`) is where this instance keeps its config, state,
+logs and worktrees. Each home is a separate instance, so one machine can run several, for
+example the installed Nightshift next to a development version (see Development). A board may
+be listed in one home only; `nightshift check` reports a board that another home lists.
+
 ## Use
 
 | You | Nightshift |
@@ -64,7 +69,7 @@ log level.
   shows it. The week starts with the first worktree it could remove.
 
 State is in `~/.nightshift/nightshift.db`, logs are in `~/.nightshift/logs/`, worktrees in
-`~/.nightshift/worktrees/`. The full behaviour is in the
+`~/.nightshift/worktrees/` (or under `NIGHTSHIFT_HOME`). The full behaviour is in the
 [product spec](docs/specs/2026-11-21-initial.md).
 
 ## Development
@@ -87,8 +92,16 @@ uv run pytest -k test_version        # single test
 
 ### Trying it on the sandbox
 
-`scripts/sandbox.py <folder> <command>` runs the CLI with its files in `<folder>` instead of
-`~/.nightshift`. The sandbox repo and board, and the rules for using them, are in `CLAUDE.md`.
+Give your development version its own home, so that it never touches the installed
+Nightshift's `~/.nightshift`:
+
+```bash
+NIGHTSHIFT_HOME=temp/sandbox uv run nightshift init     # or: export it in .envrc.local
+NIGHTSHIFT_HOME=temp/sandbox uv run nightshift start
+```
+
+`scripts/sandbox.py <folder> <command>` does the same. The sandbox repo and board, and the rules
+for using them, are in `CLAUDE.md`.
 
 ### Lint and type-check
 

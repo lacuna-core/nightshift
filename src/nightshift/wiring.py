@@ -17,6 +17,7 @@ from nightshift.errors import TrackerAuthError
 from nightshift.executor import Executor
 from nightshift.git import Git
 from nightshift.herdr import Herdr
+from nightshift.homes import Homes, default_register
 from nightshift.loop import Loop, Stop
 from nightshift.model import End, RepoInfo, Run, RunState
 from nightshift.notify import Notifier
@@ -44,10 +45,11 @@ class Boundaries:
     claude: Claude
     git: Git
     notifier: Notifier
+    homes: Homes
 
     @property
     def checks(self) -> Checks:
-        return Checks(self.tracker, self.herdr, self.claude, self.git)
+        return Checks(self.tracker, self.herdr, self.claude, self.git, self.homes)
 
 
 def build(
@@ -64,6 +66,7 @@ def build(
         claude=Claude(run, home or Path.home()),
         git=Git(run),
         notifier=Notifier(run),
+        homes=Homes(default_register(), Paths.of(settings.home).root),
     )
 
 

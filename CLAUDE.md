@@ -45,7 +45,7 @@ every shell, including CI and agent shells.
 - **`model.py`** — runs, tickets, snapshots and actions as plain data; `conventions.py` the fixed names and times (NFR-2); `naming.py` branch names.
 - **`store.py`** — SQLite: runs, and `loop_state` for what `status` shows and the outbox.
 - **Boundaries**, one module each: `tracker/github.py`, `herdr.py` (`hc`), `git.py`, `claude.py`, `notify.py`; `proc.py` runs the tools. `wiring.py` puts them together.
-- **`checks.py`** — the checks of `init`, `check` and `start`; `project_config.py` is `nightshift.yaml` and the paths under `~/.nightshift`.
+- **`checks.py`** — the checks of `init`, `check` and `start`; `project_config.py` is `nightshift.yaml` and the paths under the home (`~/.nightshift`, or `NIGHTSHIFT_HOME`); `homes.py` the machine-wide list of homes, so that no board is in two.
 - **`config.py`** — frozen `Settings` (pydantic-settings, `NIGHTSHIFT_` env prefix). Calls `load_dotenv()` at import time.
 
 Rules that keep it safe:
@@ -72,7 +72,7 @@ Tests with the real GitHub, Herdr and Claude Code use only these, which hold not
 Never point a test at another repo or board, and never at `~/.nightshift`:
 
 - Clone the sandbox repo into `/temp/` (gitignored) or a scratch folder, and run `claude` in the clone once to accept the trust dialog.
-- Run the CLI through `scripts/sandbox.py <folder> <command>`. Its config, database, logs and worktrees then live in `<folder>`.
+- Run the CLI with `NIGHTSHIFT_HOME=<folder>` (or through `scripts/sandbox.py <folder> <command>`). Its config, database, logs and worktrees then live in `<folder>`. List only the sandbox board there: a board may be in one home only.
 - Create test issues with the `nightshift` label and add them to the board, e.g. `gh project item-add 8 --owner lacuna-core --url <issue-url>`.
 - `gh` needs the `project` scope: `gh auth refresh -h github.com -s project`, in a normal terminal.
 - Agents use your Claude subscription. Keep test tickets small; the sandbox's `CLAUDE.md` asks for minimal work.

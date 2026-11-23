@@ -15,8 +15,9 @@ from nightshift.errors import (
 )
 from nightshift.git import Git
 from nightshift.herdr import Herdr, is_supported
+from nightshift.homes import Homes
 from nightshift.model import BoardOverview, IssueCount, RepoInfo
-from nightshift.project_config import ProjectConfig, parse_config
+from nightshift.project_config import Paths, ProjectConfig, parse_config, save_config
 from tests.fakes import FakeRunner, ok
 
 BOARD = "https://github.com/users/me/projects/1"
@@ -74,7 +75,11 @@ def clone(tmp_path: Path) -> Path:
 
 
 def run(
-    tracker: FakeTracker, *clones: Path, version: str = "0.1.18", home: Path | None = None
+    tracker: FakeTracker,
+    *clones: Path,
+    version: str = "0.1.18",
+    home: Path | None = None,
+    homes: Homes | None = None,
 ) -> Report:
     tools = FakeRunner(
         {
@@ -85,7 +90,8 @@ def run(
     config: ProjectConfig = parse_config(
         {"boards": [{"url": BOARD}], "repos": [{"path": str(c)} for c in clones]}
     )
-    checks = Checks(tracker, Herdr(tools), Claude(tools, home or clones[0].parent), Git(proc.run))
+    claude = Claude(tools, home or clones[0].parent)
+    checks = Checks(tracker, Herdr(tools), claude, Git(proc.run), homes)
     return checks.run(config)
 
 
@@ -205,3 +211,18 @@ def test_no_gh(clone: Path) -> None:
     report = run(tracker, clone)
     assert report.fatal
     assert "Install the GitHub CLI" in report.tools[-1].fix
+
+
+def test_board_listed_by_another_home(clone: Path, tmp_path: Path) -> None:
+    register = tmp_path / "homes.json"
+    other = tmp_path / "other-home"
+    save_config(
+        parse_config({"boards": [{"url": BOARD}], "repos": [{"path": str(clone)}]}),
+        Paths(other).config,
+    )
+    Homes(register, other).record()
+    report = run(FakeTracker(), clone, homes=Homes(register, tmp_path / "home"))
+    assert report.failed
+    assert not report.fatal
+    assert not report.boards[0].usable
+    assert texts(report, Level.FAIL) == [f"also listed by the Nightshift in {other.resolve()}"]
