@@ -76,7 +76,10 @@ Never point a test at another repo or board, and never at `~/.nightshift`:
 - Create test issues with the `nightshift` label and add them to the board, e.g. `gh project item-add 8 --owner lacuna-core --url <issue-url>`.
 - `gh` needs the `project` scope: `gh auth refresh -h github.com -s project`, in a normal terminal.
 - Agents use your Claude subscription. Keep test tickets small; the sandbox's `CLAUDE.md` asks for minimal work.
-- Herdr: watch the agents in its window. Never restart or stop the core (`hc server ...`): it holds every terminal on the machine. To crash one, start a separate core with its own `HC_SESSION` and XDG folders under `/temp/`.
+- Herdr: watch the agents in its window. Never restart or stop the core (`hc server ...`): it holds every terminal on the machine. To crash one, start a separate core with its own `HC_SESSION` and XDG folders under `/temp/`, and before starting it:
+  - unset every `CLAUDE*` variable: the core hands them to its agents, which then count as sub-sessions of yours, keep no transcript and cannot be resumed;
+  - set `GH_CONFIG_DIR=~/.config/gh` and `GIT_CONFIG_GLOBAL=~/.config/git/config` (if that file exists): the XDG folders also hide the `gh` login and git's settings.
+  Nightshift and its agents then use that core. A reboot is simulated by killing the core together with its `hc hold` processes.
 - Afterwards: stop the loop, close the issues and PRs you opened, and end only the terminals the test started (their folder is under your scratch folder).
 
 A milestone's "done when" that says "on the sandbox" is met only by a run there, not by the fakes in `tests/`.
