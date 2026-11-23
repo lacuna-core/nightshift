@@ -101,6 +101,7 @@ uv run mypy               # strict type-check
 
 Docs:
 
+- **`docs/design.md`** — how Nightshift is built, with diagrams; read this first
 - **`docs/decisions.md`** — append-only log of significant decisions and why they were made
 
 See `CLAUDE.md` for coding conventions. `AGENTS.md` points other coding agents to it.

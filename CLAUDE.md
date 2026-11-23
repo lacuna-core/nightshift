@@ -60,7 +60,7 @@ Tests: `tests/build.py` builds plain data for `decide`; `tests/world.py` is a wh
 
 Logging is first configured in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. `start` replaces it with stdout plus `~/.nightshift/logs/nightshift.log`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
 
-`docs/decisions.md` is the decision log (see below).
+`docs/design.md` is the high-level design, with diagrams: read it first. `docs/decisions.md` is the decision log (see below).
 
 ## Commit Message Convention
 
@@ -126,4 +126,5 @@ In a Claude Code cloud session started from an issue or a link, rename the sessi
 - Releases are made by the `release.yml` workflow (manual): git-cliff works out the next version from the commits since the last `v*` tag (`feat` raises the minor number, anything else the patch number) and publishes a GitHub release with notes made from those commits, which creates the tag. Never bump a version, push a `v*` tag or write release notes by hand as part of a change. The `version` in `pyproject.toml` and `__version__` are placeholders.
 - `docs/decisions.md` is an append-only log of significant decisions, oldest first. Each entry is `## YYYY-MM-DD — <decision as a short statement>` followed by **Context**, **Decision** and **Consequences** paragraphs. Keep an entry compact: about 120 words, one to three sentences per paragraph, covering what was chosen, why, and the trade-offs someone would not guess. Leave out how it is implemented (file names, endpoints, flags, steps); that belongs in the code and the other docs. When you make a significant decision, add an entry in the same change: a new dependency, a change to a data format, API or stored data, a deviation from these conventions, or any hard-to-reverse choice the next person would wonder about. Minor choices belong in the PR description. Never edit past entries; to change a decision, add a new entry that names the one it replaces. This file (`CLAUDE.md`) is the source of truth for current rules; the log explains why.
 - Scratch files (drafts, generated options) go in `/temp/`, which is gitignored.
+- `docs/design.md` describes how the solution works now. Keep it up to date: when a change makes a statement or a diagram in it wrong (the loop, a module or its dependencies, a run state or transition, a rule for following the user, recovery, cleanup, stored data, how it is tested), update it in the same change. Keep it high-level and easy to read: short sentences, mermaid diagrams, no details that belong in the code, the spec or the decision log.
 - **After every significant change** — new CLI command, new data pipeline, new dependency, changed directory layout — update `CLAUDE.md` (architecture / conventions) and `README.md` (user-facing instructions, dev setup, release process). Keep them in sync with the actual codebase.
