@@ -13,7 +13,7 @@ from nightshift.claude import Claude
 from nightshift.cleanup import Cleanup
 from nightshift.config import Settings
 from nightshift.conventions import LABELS
-from nightshift.errors import ToolError, TrackerAuthError
+from nightshift.errors import TrackerAuthError
 from nightshift.executor import Executor
 from nightshift.git import Git
 from nightshift.herdr import Herdr
@@ -27,10 +27,7 @@ from nightshift.tracker.github import GitHub
 
 
 def gh_token(run: proc.Runner) -> str:
-    try:
-        result = run(["gh", "auth", "token", "--hostname", "github.com"])
-    except ToolError as e:
-        raise TrackerAuthError(str(e)) from e
+    result = run(["gh", "auth", "token", "--hostname", "github.com"])  # ToolError: no gh
     if result.code != 0 or not result.out.strip():
         raise TrackerAuthError("`gh` is not logged in")
     return result.out.strip()

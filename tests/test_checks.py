@@ -7,7 +7,12 @@ import pytest
 from nightshift import proc
 from nightshift.checks import Checks, Level, Report
 from nightshift.claude import Claude
-from nightshift.errors import NightshiftError, TrackerNotFoundError, TrackerUnavailableError
+from nightshift.errors import (
+    NightshiftError,
+    ToolError,
+    TrackerNotFoundError,
+    TrackerUnavailableError,
+)
 from nightshift.git import Git
 from nightshift.herdr import Herdr, is_supported
 from nightshift.model import BoardOverview, IssueCount, RepoInfo
@@ -192,3 +197,11 @@ def test_worktree_is_not_a_clone(clone: Path, tmp_path: Path) -> None:
     subprocess.run([*git, "worktree", "add", "-q", str(tmp_path / "wt")], check=True)
     assert Git(proc.run).is_clone(clone)
     assert not Git(proc.run).is_clone(tmp_path / "wt")
+
+
+def test_no_gh(clone: Path) -> None:
+    tracker = FakeTracker()
+    tracker.login_error = ToolError("`gh` was not found on PATH")
+    report = run(tracker, clone)
+    assert report.fatal
+    assert "Install the GitHub CLI" in report.tools[-1].fix

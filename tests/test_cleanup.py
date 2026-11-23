@@ -1,5 +1,6 @@
 """FR-13 and NFR-8, against real git: nothing that could be lost is removed."""
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -88,6 +89,23 @@ def begin_rebase(world: World, path: Path) -> None:
     git(path, "symbolic-ref", "HEAD", "refs/heads/42/export-csv")
 
 
+def begin_cherry_pick(world: World, path: Path) -> None:
+    git(path, "branch", "side", "main")
+    git(path, "switch", "-q", "side")
+    (path / "feature.py").write_text("other\n")
+    git(path, "add", "feature.py")
+    git(path, "commit", "-qm", "side")
+    git(path, "switch", "-q", "42/export-csv")
+    subprocess.run(["git", "cherry-pick", "side"], cwd=path, capture_output=True, check=False)
+    git(path, "checkout", "-q", "HEAD", "--", "feature.py")  # a clean tree, still in progress
+
+
+def begin_revert(world: World, path: Path) -> None:
+    git(path, "commit", "-q", "--allow-empty", "-m", "to revert")
+    world.pr_commits["PR_1"].add(git(path, "rev-parse", "HEAD"))
+    git(path, "revert", "--no-commit", "HEAD")
+
+
 def begin_merge(world: World, path: Path) -> None:
     git(path, "branch", "side", "main")
     git(path, "switch", "-q", "side")
@@ -157,6 +175,8 @@ UNSAFE: dict[str, Change] = {
     "other branch": lambda w, p: git(p, "switch", "-qc", "mine"),
     "rebase in progress": begin_rebase,
     "merge in progress": begin_merge,
+    "cherry-pick in progress": begin_cherry_pick,
+    "revert in progress": begin_revert,
     "bisect in progress": lambda w, p: git(p, "bisect", "start"),
     "submodule": submodule,
     "extra commit": extra_commit,
@@ -178,6 +198,7 @@ def test_unsafe_after_a_merge_keeps_everything(world: World, issue: Issue, name:
     assert path.is_dir()
     assert world.run().cleaned_up_at is None
     assert world.run().kept_reason
+    assert world.run().kept_reason != "it is being removed"
     assert "42/export-csv" in branches(world)
     assert all(t["state"] == "live" for t in world.hc.terminals.values())
     assert len(world.hc.terminals) == before
