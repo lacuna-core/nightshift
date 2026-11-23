@@ -1,0 +1,58 @@
+"""Running command-line tools."""
+
+import os
+import subprocess
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+from nightshift.errors import ToolError
+
+_CALLER = ("CLAUDE", "HC_TERMINAL_", "HC_SCOPE")
+
+
+@dataclass(frozen=True)
+class Result:
+    code: int
+    out: str
+    err: str
+
+
+class Runner(Protocol):
+    def __call__(
+        self, args: Sequence[str], *, cwd: Path | None = None, timeout: float = 60
+    ) -> Result: ...
+
+
+def run(args: Sequence[str], *, cwd: Path | None = None, timeout: float = 60) -> Result:
+    """Run a tool to its end and return what it wrote, whatever its exit code.
+
+    It gets its own session, so that Ctrl-C in the loop's terminal reaches only Nightshift
+    and never stops a tool halfway. It does not learn that Nightshift may run inside Herdr or
+    Claude Code: ``hc send`` would mark its text as coming from that terminal.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith(_CALLER)}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["LC_ALL"] = "C.UTF-8"
+    try:
+        done = subprocess.run(
+            list(args),
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except FileNotFoundError as e:
+        if cwd is not None and not cwd.is_dir():
+            raise ToolError(f"folder {cwd} does not exist") from e
+        raise ToolError(f"`{args[0]}` was not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise ToolError(f"`{' '.join(args[:2])}` took longer than {timeout:.0f} s") from e
+    except OSError as e:
+        raise ToolError(f"`{args[0]}` could not be run: {e}") from e
+    return Result(done.returncode, done.stdout, done.stderr)

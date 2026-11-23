@@ -1,41 +1,81 @@
-# nightshift
+# Nightshift
 
-Personal dark factory
+A personal software factory. Nightshift watches your GitHub Project boards, takes the
+highest-ranked ready ticket, and gives it to a Claude Code agent in its own git worktree, which
+opens a pull request. You watch and step in through [Herdr](https://github.com/herdrdev/herdr-app).
 
-## Prerequisites
+Label tickets `nightshift`, rank them in the Todo column, start Nightshift and walk away. When you
+come back, each ticket is In Review with a pull request, or flagged `nightshift:needs-human` with a
+comment saying why.
 
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [direnv](https://direnv.net/) — loads `.env` and the virtualenv's tools when
-  you `cd` into the repo (`direnv allow` once)
+## Requirements
 
-## Install
+- macOS, with [uv](https://docs.astral.sh/uv/), git and [gh](https://cli.github.com/)
+- `gh` logged in with the `project` scope: `gh auth refresh -h github.com -s project`
+- [herdr-app](https://github.com/herdrdev/herdr-app) with herdr-core 0.1.18 or a later 0.1 (`hc`
+  on `PATH`)
+- [Claude Code](https://claude.com/claude-code), logged in
+- A GitHub Project whose Status field has `Todo`, `In Progress` and `In Review`
+- Local clones of the repos. In each:
+  - run `claude` once and accept the trust dialog;
+  - allow at least `git commit`, `git push` and `gh pr create` in `.claude/settings.json`,
+    committed to the repo. Agents run in `acceptEdits` mode; a permission prompt nobody
+    answers makes the ticket wait for you.
 
-```bash
-git clone <repo-url> your_project_name
-cd your_project_name
-uv sync --dev
-uv run pre-commit install   # ruff + mypy on every commit, and a commit message check
-```
-
-## Configure
-
-Copy `.env.example` to `.env` and set values:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NIGHTSHIFT_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-
-## Usage
+## Install and set up
 
 ```bash
-uv run nightshift --help
+uv tool install git+https://github.com/lacuna-core/nightshift
+nightshift init     # choose boards and repos; writes ~/.nightshift/nightshift.yaml
+nightshift check    # what is missing, and how to fix it
+nightshift start    # runs in the foreground
 ```
+
+```yaml
+# ~/.nightshift/nightshift.yaml
+boards:
+  - url: https://github.com/users/<you>/projects/<n>
+    max_parallel_agents: 2    # optional, default 5
+repos:
+  - path: ~/dev/webapp
+    stall_timeout: 40m        # optional, default 20m
+    max_run_time: 5h          # optional, default 3h
+```
+
+Changes take effect when Nightshift restarts. `NIGHTSHIFT_LOG_LEVEL` (default `INFO`) sets the
+log level.
+
+## Use
+
+| You | Nightshift |
+|-----|------------|
+| Add the `nightshift` label to a Todo ticket | Picks it when its rank comes up and a slot is free |
+| Answer or approve in the agent's tab | Goes on, and removes `nightshift:needs-human` |
+| Move a ticket back to Todo | Starts over: closes the old PR, keeps its branch, makes a new one |
+| Remove the `nightshift` label | Stops the agent and leaves everything to you |
+| Merge the PR | Removes the worktree and the local branch, when nothing can be lost |
+| Move the ticket elsewhere, or close the issue or the PR | Stops the agent and keeps everything |
+
+- `nightshift status` shows runs, free slots, problems, kept worktrees and what waits for you.
+- `nightshift stop` (or Ctrl-C) stops the loop. Agents keep running, and the next `start` picks
+  them up again.
+- Nightshift and its agents never merge and never close issues.
+- **In its first week Nightshift removes nothing.** It logs what it would remove, and `status`
+  shows it. The week starts with the first worktree it could remove.
+
+State is in `~/.nightshift/nightshift.db`, logs are in `~/.nightshift/logs/`, worktrees in
+`~/.nightshift/worktrees/`. The full behaviour is in the
+[product spec](docs/specs/2026-11-21-initial.md).
 
 ## Development
+
+[direnv](https://direnv.net/) is optional: it loads `.env` and the virtualenv's tools.
+
+```bash
+uv sync --dev
+uv run pre-commit install   # ruff + mypy on every commit, and a commit message check
+uv run nightshift --help
+```
 
 ### Running tests
 
@@ -55,15 +95,14 @@ uv run mypy               # strict type-check
 
 ### Project structure
 
-`src/nightshift/` is layered:
-
-- **`config.py`** — pydantic-settings with `NIGHTSHIFT_` env prefix
-- **`cli/app.py`** — Typer CLI; add sub-commands as `cli/<name>.py` and register via `app.add_typer(...)`
+`src/nightshift/` observes (`observe.py`), decides in one pure function (`decide.py`) and acts
+(`executor.py`). Each outside tool has one module: `tracker/github.py`, `herdr.py`, `git.py`,
+`claude.py`, `notify.py`. The rest of the map is in `CLAUDE.md`.
 
 Docs:
 
+- **`docs/design.md`** — how Nightshift is built, with diagrams; read this first
 - **`docs/decisions.md`** — append-only log of significant decisions and why they were made
-- **`docs/changes/`** — dated historical records (build prompts, plans)
 
 See `CLAUDE.md` for coding conventions. `AGENTS.md` points other coding agents to it.
 

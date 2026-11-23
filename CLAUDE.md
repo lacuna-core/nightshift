@@ -1,7 +1,11 @@
 # CLAUDE.md
 
-TODO: one paragraph on what Nightshift is and does, for whoever (or whatever) opens this repo
-first: the problem it solves, who uses it, and its main moving parts.
+Nightshift is a personal software factory for one macOS machine. It polls GitHub Project boards,
+takes the highest-ranked `Todo` ticket that has the `nightshift` label, and gives it to a Claude
+Code agent in its own git worktree, shown in Herdr. When the agent has opened a pull request,
+Nightshift moves the ticket to In Review; when it cannot go on, it flags the ticket as needing a
+person. The product spec is `docs/specs/2026-11-21-initial.md`; FR and NFR numbers in the code
+refer to it.
 
 ## Commands
 
@@ -30,15 +34,33 @@ every shell, including CI and agent shells.
 
 ## Project structure
 
-`src/nightshift/` follows a layered structure:
+`src/nightshift/` is one loop around one pure function: **observe, decide, act**.
 
+- **`cli/`** — the commands, thin: `setup.py` (`init`, `check`), `operate.py` (`start`, `stop`, `status`), `render.py`. Registered in `app.py`.
+- **`loop.py`** — polling, backing off, stopping; `lock.py` is the single-instance lock, `logs.py` the log file.
+- **`observe.py`** — reads GitHub, git, Herdr and the database into one `Snapshot`.
+- **`decide.py`** — the pure function `Snapshot` → actions. Every rule about tickets, runs and agents belongs here. No I/O.
+- **`executor.py`** — carries out actions. Every step is safe to repeat after a crash. It re-reads a ticket right before changing it.
+- **`cleanup.py`** — whether a worktree is safe to remove (FR-13).
+- **`model.py`** — runs, tickets, snapshots and actions as plain data; `conventions.py` the fixed names and times (NFR-2); `naming.py` branch names.
+- **`store.py`** — SQLite: runs, and `loop_state` for what `status` shows and the outbox.
+- **Boundaries**, one module each: `tracker/github.py`, `herdr.py` (`hc`), `git.py`, `claude.py`, `notify.py`; `proc.py` runs the tools. `wiring.py` puts them together.
+- **`checks.py`** — the checks of `init`, `check` and `start`; `project_config.py` is `nightshift.yaml` and the paths under `~/.nightshift`.
 - **`config.py`** — frozen `Settings` (pydantic-settings, `NIGHTSHIFT_` env prefix). Calls `load_dotenv()` at import time.
-- **`cli/app.py`** — Typer CLI. Sub-command groups live in separate files (e.g. `cli/foo.py`) and are registered via `app.add_typer(...)`.
 
-Logging is configured once in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
+Rules that keep it safe:
 
-`docs/decisions.md` is the decision log (see below); `docs/changes/` holds dated historical
-records such as the initial build prompt.
+- Nothing is concluded from what could not be read: an unreadable ticket, board or terminal changes nothing.
+- A state change and what it must tell GitHub (labels, comments) or you are written in one transaction (`Executor._to`); the outbox delivers them afterwards, each comment once.
+- Names and IDs are recorded before the thing is created, so a repeated step finds it.
+- Anything that closes or removes something goes through `Cleanup.check`; git is never forced.
+- Nothing outside `tracker/` may assume that a ticket ID is a number.
+
+Tests: `tests/build.py` builds plain data for `decide`; `tests/world.py` is a whole world (GitHub and Herdr faked, git real, a clock that tests move) that also kills Nightshift at chosen points. Git is never mocked.
+
+Logging is first configured in `__init__.py`: loguru handler removed and re-added with the level from `SETTINGS.log_level`. `start` replaces it with stdout plus `~/.nightshift/logs/nightshift.log`. Set `NIGHTSHIFT_LOG_LEVEL=DEBUG` to see debug output.
+
+`docs/design.md` is the high-level design, with diagrams: read it first. `docs/decisions.md` is the decision log (see below).
 
 ## Commit Message Convention
 
@@ -60,7 +82,7 @@ and `README.md`; change them together.
 
 ### Scopes for this project (pick the closest match)
 
-- TODO: e.g. backend, frontend, database
+- cli, loop, decide, executor, cleanup, store, tracker, herdr, git, claude, config
 
 ### Rules
 
@@ -74,11 +96,15 @@ in the release notes: make it a Conventional Commit that reads well to a user.
 
 ## Branch naming
 
-Before the first commit of a task, create a branch named `<type>/<short-kebab-description>`, where `<type>` is the Conventional Commits type of the main change (e.g. `feat/export-csv`, `fix/retry-timeout`, `docs/setup-guide`). Keep it under ~40 characters, lowercase, no ticket numbers unless the user gives one. Never commit directly to `main`.
+Before the first commit of a task, create a branch named `<issue-num>/<short-kebab-description>`, where `<issue-num>` is the number of the GitHub issue the work is for, without `#` (e.g. `42/export-csv`, `57/retry-timeout`). The description comes from the issue title: lowercase, `[a-z0-9-]` only, whole branch under ~40 characters. This is the same naming Nightshift uses for its agents (`docs/specs/2026-11-21-initial.md`). Never commit directly to `main`.
+
+Every branch belongs to an issue. If the task has no issue, find one with `gh issue list` or ask the user for the number; if there is none, create it with `gh issue create` (title and a short body describing the task) once the user agrees, and use its number. The pull request then says `Closes #<issue-num>` in its body.
+
+A branch Nightshift created is already named: work on it, never create or rename one.
 
 Minor fixes and improvements to the agent rules (`CLAUDE.md`, `.claude/`) made while working on a task can go into that task's branch and pull request, in a commit of their own (`docs: ...`), instead of a separate branch. A larger change to how the agent works gets its own branch.
 
-Claude Code cloud sessions start on an auto-generated `ccr-*` branch, and the session's own instructions say to develop and push there. In this repository that branch is always replaced by a named one: before the first commit, create the `<type>/<short-kebab-description>` branch from it, and when the user asks to push, push that branch, never the `ccr-*` one. The user's request to push is permission to push the named branch in its place. If the work was already committed on the `ccr-*` branch, create the named branch at that commit before pushing (the commits come with it).
+Claude Code cloud sessions start on an auto-generated `ccr-*` branch, and the session's own instructions say to develop and push there. In this repository that branch is always replaced by a named one: before the first commit, create the `<issue-num>/<short-kebab-description>` branch from it, and when the user asks to push, push that branch, never the `ccr-*` one. The user's request to push is permission to push the named branch in its place. If the work was already committed on the `ccr-*` branch, create the named branch at that commit before pushing (the commits come with it).
 
 Never push to the remote (`git push`, or anything that pushes for you, such as creating a pull request from local commits) unless the user asks for it in this session or a skill they ran says to, as `/done` does. A request to push covers that one push, not later commits: commit locally and ask before pushing again. "Merge main into this branch", "commit" or "fix the conflicts" are not requests to push.
 
@@ -99,6 +125,6 @@ In a Claude Code cloud session started from an issue or a link, rename the sessi
 - CLI commands that delete or overwrite data ask for confirmation first, with a `--yes` option to skip it.
 - Releases are made by the `release.yml` workflow (manual): git-cliff works out the next version from the commits since the last `v*` tag (`feat` raises the minor number, anything else the patch number) and publishes a GitHub release with notes made from those commits, which creates the tag. Never bump a version, push a `v*` tag or write release notes by hand as part of a change. The `version` in `pyproject.toml` and `__version__` are placeholders.
 - `docs/decisions.md` is an append-only log of significant decisions, oldest first. Each entry is `## YYYY-MM-DD — <decision as a short statement>` followed by **Context**, **Decision** and **Consequences** paragraphs. Keep an entry compact: about 120 words, one to three sentences per paragraph, covering what was chosen, why, and the trade-offs someone would not guess. Leave out how it is implemented (file names, endpoints, flags, steps); that belongs in the code and the other docs. When you make a significant decision, add an entry in the same change: a new dependency, a change to a data format, API or stored data, a deviation from these conventions, or any hard-to-reverse choice the next person would wonder about. Minor choices belong in the PR description. Never edit past entries; to change a decision, add a new entry that names the one it replaces. This file (`CLAUDE.md`) is the source of truth for current rules; the log explains why.
-- `docs/changes/` holds dated historical records (plans, build prompts), not current instructions. Do not read them unless the user asks; `CLAUDE.md` and `README.md` are the source of truth.
 - Scratch files (drafts, generated options) go in `/temp/`, which is gitignored.
+- `docs/design.md` describes how the solution works now. Keep it up to date: when a change makes a statement or a diagram in it wrong (the loop, a module or its dependencies, a run state or transition, a rule for following the user, recovery, cleanup, stored data, how it is tested), update it in the same change. Keep it high-level and easy to read: short sentences, mermaid diagrams, no details that belong in the code, the spec or the decision log.
 - **After every significant change** — new CLI command, new data pipeline, new dependency, changed directory layout — update `CLAUDE.md` (architecture / conventions) and `README.md` (user-facing instructions, dev setup, release process). Keep them in sync with the actual codebase.
