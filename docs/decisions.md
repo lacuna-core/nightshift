@@ -170,3 +170,17 @@ scope.
 **Consequences:** Development and real use run side by side without touching each other's
 files. The check covers only homes that have been set up or started. Instances still share
 Herdr and the Claude subscription, so one can use up the other's usage limit.
+
+## 2026-11-23 — Only tickets assigned to the configured user are picked up
+
+**Context:** On a shared board anyone who can add labels could hand a ticket to someone's
+Nightshift, which then runs on their machine, against their usage, with their `gh` login,
+even if the ticket is assigned to someone else.
+
+**Decision:** The config names a GitHub `user`, and a ticket is picked only if it has the
+`nightshift` label and is assigned to that user. Removing the user as assignee during or
+after a run counts as taking it over, like removing the label.
+
+**Consequences:** Several people can share a board, each with their own Nightshift. Every
+ticket now needs an assignee as well as the label, one more step for a solo user, and
+existing configs must add `user`.
