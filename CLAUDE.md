@@ -69,6 +69,11 @@ Tests with the real GitHub, Herdr and Claude Code use only these, which hold not
 - Repo: https://github.com/lacuna-core/nightshift-sandbox (private)
 - Board: https://github.com/users/lacuna-core/projects/8 (private, "Nightshift sandbox")
 
+**Always set your own `NIGHTSHIFT_HOME` for an end-to-end test**, e.g. a folder under `/temp/`.
+The person on this machine may run their real Nightshift in `~/.nightshift` at the same time:
+the default home would mix your test with their config, state, lock and worktrees, and `stop`
+would stop their loop. A separate home is a separate instance (spec NFR-5).
+
 Never point a test at another repo or board, and never at `~/.nightshift`:
 
 - Clone the sandbox repo into `/temp/` (gitignored) or a scratch folder, and run `claude` in the clone once to accept the trust dialog.
