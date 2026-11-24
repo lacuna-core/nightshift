@@ -38,8 +38,10 @@ class Paths:
     root: Path
 
     @classmethod
-    def default(cls) -> Paths:
-        return cls(Path.home() / ".nightshift")
+    def of(cls, home: Path | None) -> Paths:
+        """The paths under ``home`` (``NIGHTSHIFT_HOME``), or under ``~/.nightshift``."""
+        root = home.expanduser() if home is not None else Path.home() / ".nightshift"
+        return cls(root.resolve())
 
     @property
     def config(self) -> Path:

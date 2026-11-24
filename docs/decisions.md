@@ -156,3 +156,17 @@ machine, and ends without anyone having to change anything.
 **Consequences:** No setting to remember, and every new machine gets the same trial. Worktrees
 pile up for a week and then go on the first poll after it. Pull requests are closed on starting
 over from the first day, because that can be undone.
+
+## 2026-11-23 — Several instances on one machine, one board each
+
+**Context:** One instance per machine, in a fixed `~/.nightshift`, left no way to use the
+installed Nightshift on real projects while trying a development version on a sandbox.
+
+**Decision:** An instance is a home folder, `~/.nightshift` unless `NIGHTSHIFT_HOME` names
+another. A board may be listed in one home only, checked through a machine-wide list of
+homes. Repos may be shared. This replaces "several instances on one machine" being out of
+scope.
+
+**Consequences:** Development and real use run side by side without touching each other's
+files. The check covers only homes that have been set up or started. Instances still share
+Herdr and the Claude subscription, so one can use up the other's usage limit.

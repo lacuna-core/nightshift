@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +13,10 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     """Loguru level: ``DEBUG``, ``INFO``, ``WARNING`` or ``ERROR``."""
+
+    home: Path | None = None
+    """The folder that holds this instance's config, database, lock, logs and worktrees
+    (``NIGHTSHIFT_HOME``). Each folder is a separate instance. Unset: ``~/.nightshift``."""
 
 
 SETTINGS = Settings()

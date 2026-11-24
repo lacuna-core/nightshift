@@ -16,6 +16,7 @@ from nightshift.errors import (
 )
 from nightshift.git import Git
 from nightshift.herdr import Herdr, is_supported
+from nightshift.homes import Homes
 from nightshift.model import BoardOverview, RepoInfo
 from nightshift.project_config import ProjectConfig
 from nightshift.tracker.github import slug_of_remote
@@ -93,11 +94,19 @@ class SetupTracker(Protocol):
 
 
 class Checks:
-    def __init__(self, tracker: SetupTracker, herdr: Herdr, claude: Claude, git: Git) -> None:
+    def __init__(
+        self,
+        tracker: SetupTracker,
+        herdr: Herdr,
+        claude: Claude,
+        git: Git,
+        homes: Homes | None = None,
+    ) -> None:
         self._tracker = tracker
         self._herdr = herdr
         self._claude = claude
         self._git = git
+        self._homes = homes
 
     def run(self, config: ProjectConfig) -> Report:
         tools = [self._herdr_check(), self._claude_check()]
@@ -106,10 +115,11 @@ class Checks:
         if github.level is Level.FAIL or not available:
             return Report(tuple(tools), unavailable=not available)
         repos = self._repos(config)
+        elsewhere = self._homes.boards_elsewhere() if self._homes else {}
         return Report(
             tuple(tools),
             repos,
-            tuple(self._board(board.url) for board in config.boards),
+            tuple(self._shared(self._board(b.url), elsewhere) for b in config.boards),
             listed=frozenset(r.info.slug for r in repos if r.info),
         )
 
@@ -251,6 +261,19 @@ class Checks:
         return RepoReport(path, tuple(findings), info)
 
     # --- boards -----------------------------------------------------------------------
+
+    @staticmethod
+    def _shared(report: BoardReport, elsewhere: dict[str, Path]) -> BoardReport:
+        """Two instances on one board would take each other's tickets for ones without a run."""
+        other = elsewhere.get(report.url)
+        if other is None:
+            return report
+        finding = Finding(
+            Level.FAIL,
+            f"also listed by the Nightshift in {other}",
+            "List each board in one home only (NIGHTSHIFT_HOME).",
+        )
+        return BoardReport(report.url, (*report.findings, finding), report.overview)
 
     def _board(self, url: str) -> BoardReport:
         try:

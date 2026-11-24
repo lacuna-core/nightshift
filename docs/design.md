@@ -336,7 +336,8 @@ flowchart TB
 
 ## 9. What is stored
 
-Everything is in `~/.nightshift/`. Repos hold nothing of Nightshift's.
+Everything is in the home, `~/.nightshift/` unless `NIGHTSHIFT_HOME` names another; each home
+is a separate instance. Repos hold nothing of Nightshift's.
 
 | Where | What |
 |-------|------|

@@ -47,7 +47,7 @@ def start(
     from nightshift.project_config import Paths
     from nightshift.store import Store
 
-    paths = Paths.default()
+    paths = Paths.of(SETTINGS.home)
     config = _config(paths)
     lock = Lock(paths.lock)
     try:
@@ -58,6 +58,7 @@ def start(
     try:
         configure(paths.log, SETTINGS.log_level, stdout=sys.stdout)
         boundaries = wiring.build(SETTINGS)
+        boundaries.homes.record()
         report = boundaries.checks.run(config)
         render.report(console, report)
         if report.fatal:
@@ -123,10 +124,11 @@ def stop() -> None:
     import signal
     import time
 
+    from nightshift.config import SETTINGS
     from nightshift.lock import holder
     from nightshift.project_config import Paths
 
-    lock = Paths.default().lock
+    lock = Paths.of(SETTINGS.home).lock
     pid = holder(lock)
     if pid is None:
         console.print("Nightshift is not running.")
@@ -143,11 +145,12 @@ def stop() -> None:
 
 def status() -> None:
     """Show what Nightshift is doing and what waits for you."""
+    from nightshift.config import SETTINGS
     from nightshift.lock import holder
     from nightshift.project_config import Paths
     from nightshift.store import Store
 
-    paths = Paths.default()
+    paths = Paths.of(SETTINGS.home)
     config = _config(paths)
     pid = holder(paths.lock)
     console.print("Loop       " + ("not running" if pid is None else f"running (process {pid})"))
