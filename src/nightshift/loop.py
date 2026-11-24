@@ -91,4 +91,7 @@ class Loop:
             report["unlisted"] = [
                 f"{item.repo} #{item.ticket_id}" for item in decide.unlisted(snapshot)
             ]
+            report["not_assigned"] = [
+                f"{item.repo} #{item.ticket_id}" for item in decide.not_assigned(snapshot)
+            ]
         self._store.put("report", report)

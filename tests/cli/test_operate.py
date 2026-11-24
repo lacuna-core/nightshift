@@ -19,7 +19,7 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     root = tmp_path / ".nightshift"
     root.mkdir()
     (root / "nightshift.yaml").write_text(
-        f"boards:\n- url: {BOARD}\nrepos:\n- path: {tmp_path / 'web'}\n"
+        f"user: me\nboards:\n- url: {BOARD}\nrepos:\n- path: {tmp_path / 'web'}\n"
     )
     return root
 

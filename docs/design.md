@@ -153,7 +153,7 @@ sequenceDiagram
     participant H as Herdr
     participant A as Agent
 
-    You->>G: label and rank the ticket
+    You->>G: label, assign to yourself and rank the ticket
     N->>G: poll
     N->>D: run "claimed"
     N->>G: read again, set In Progress
@@ -231,7 +231,7 @@ question answered with yes wins:
 
 ```mermaid
 flowchart TB
-    live(["A live run, on every poll"]) --> label{"Label<br/>removed?"}
+    live(["A live run, on every poll"]) --> label{"Label or your<br/>assignment removed?"}
     label -->|yes| yours["Cancel: it is yours now"]
     label -->|no| merged{"PR merged?"}
     merged -->|yes| finish["Let the agent finish its turn,<br/>then done"]

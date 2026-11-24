@@ -98,6 +98,7 @@ def build_loop(
         repos=observer.repo,
         now=now,
         sleep=time.sleep,
+        user=config.user,
     )
     return Loop(store=store, observer=observer, executor=executor, stop=stop, now=now)
 

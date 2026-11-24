@@ -21,6 +21,8 @@ class RepoInfo:
 class IssueCount:
     open: int = 0
     labelled: int = 0
+    assigned: int = 0
+    """Labelled and assigned to the configured user."""
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,9 @@ class Item:
     boards: frozenset[str] = frozenset()
     """The URLs of all boards the ticket is on, in lower case."""
 
+    assignees: frozenset[str] = frozenset()
+    """Logins, in lower case."""
+
 
 @dataclass(frozen=True)
 class Board:
@@ -177,6 +182,11 @@ class TicketFacts:
     prs: tuple[Pr, ...] = ()
     transferred: bool = False
     repo: str = ""
+    assignees: frozenset[str] = frozenset()
+    """Logins, in lower case."""
+
+    unassigned: frozenset[str] = frozenset()
+    """Logins, in lower case, removed as assignee since the run started."""
 
     @property
     def pr(self) -> Pr | None:
@@ -322,6 +332,9 @@ class Snapshot:
     signalled: frozenset[str] = frozenset()
     """Tickets without a run that were flagged already (FR-1)."""
 
+    user: str = ""
+    """The configured GitHub login, in lower case: only their tickets are picked up."""
+
 
 # --- what to do ---------------------------------------------------------------------------
 
@@ -396,9 +409,10 @@ class Finish:
 
 @dataclass(frozen=True)
 class TakeOver:
-    """You removed the label from the ticket of a run that has ended."""
+    """You took over the ticket of a run that has ended."""
 
     run: Run
+    reason: str = ""
 
 
 @dataclass(frozen=True)

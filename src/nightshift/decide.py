@@ -54,6 +54,7 @@ from nightshift.model import (
     SetLimit,
     Snapshot,
     TakeOver,
+    TicketFacts,
     Unflag,
     Update,
     UsageLimit,
@@ -86,8 +87,8 @@ def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
     if changes := _seen(view, snapshot.now):
         yield Update(view.run, changes)
     if view.run.live:
-        changed = list(_changed_by_you(view))
-        yield from changed or _live(view)
+        changed = list(_changed_by_you(view, snapshot.user))
+        yield from changed or _live(view, snapshot.user)
     elif view.run.state is RunState.RESETTING:
         yield Reset(view.run)  # one that has started always finishes
     elif view.run.state is RunState.DISCARDED:
@@ -95,7 +96,7 @@ def _run(view: RunView, snapshot: Snapshot) -> Iterator[Action]:
             yield CleanUp(view.run, None)
     else:
         yield from _stopping(view, snapshot)
-        yield from _ended(view)
+        yield from _ended(view, snapshot.user)
 
 
 def _has_tab(view: RunView) -> bool:
@@ -128,10 +129,19 @@ def _seen(view: RunView, now: datetime) -> dict[str, Any]:
     return changes
 
 
-def _taken_over(view: RunView) -> bool:
+def _taken_over(view: RunView, user: str) -> bool:
     ticket = view.ticket
     assert ticket is not None
-    return view.run.taken_over or ticket.label_removed or LABEL not in ticket.labels
+    return view.run.taken_over or _taken_over_reason(ticket, user) is not None
+
+
+def _taken_over_reason(ticket: TicketFacts, user: str) -> str | None:
+    """Why the ticket is yours now: the label was removed, or you are no longer assigned."""
+    if ticket.label_removed or LABEL not in ticket.labels:
+        return f"The `{LABEL}` label was removed, so this is yours now. " + _LEFT_ALONE
+    if user not in ticket.assignees or user in ticket.unassigned:
+        return f"{user} is no longer assigned, so this is yours now. " + _LEFT_ALONE
+    return None
 
 
 def moved_to_todo(view: RunView) -> bool:
@@ -143,7 +153,7 @@ def moved_to_todo(view: RunView) -> bool:
     return view.run.seen_out_of_todo or view.streaks.todo_polls >= TODO_POLLS
 
 
-def _changed_by_you(view: RunView) -> Iterator[Action]:
+def _changed_by_you(view: RunView, user: str) -> Iterator[Action]:
     """What you did to the ticket of a live run (FR-12). The first that applies wins."""
     run, ticket = view.run, view.ticket
     assert ticket is not None
@@ -156,8 +166,8 @@ def _changed_by_you(view: RunView) -> Iterator[Action]:
     def cancel(event: str, reason: str, *, needs_human: bool = False) -> End:
         return End(run, RunState.CANCELLED, event, reason, needs_human=needs_human, interrupt=True)
 
-    if _taken_over(view):
-        yield cancel("taken-over", _TAKEN_OVER)
+    if _taken_over(view, user):
+        yield cancel("taken-over", _taken_over_reason(ticket, user) or _LEFT_ALONE)
     elif ticket.transferred:
         yield cancel("transferred", "The issue was transferred to another repository.")
     elif merged:
@@ -187,17 +197,16 @@ def _word(status: str | None) -> str:
     return "".join(c if c.isalnum() else "-" for c in (status or "none").lower())
 
 
-_TAKEN_OVER = (
-    f"The `{LABEL}` label was removed, so this is yours now. Nightshift leaves the agent's tab, "
-    "the worktree, the branch and the pull request alone."
+_LEFT_ALONE = (
+    "Nightshift leaves the agent's tab, the worktree, the branch and the pull request alone."
 )
 
 
-def _ended(view: RunView) -> Iterator[Action]:
+def _ended(view: RunView, user: str) -> Iterator[Action]:
     run, ticket = view.run, view.ticket
     assert ticket is not None
-    if _taken_over(view) and not run.taken_over:
-        yield TakeOver(run)
+    if _taken_over(view, user) and not run.taken_over:
+        yield TakeOver(run, _taken_over_reason(ticket, user) or "")
     elif moved_to_todo(view) and ticket.is_open and LABEL in ticket.labels:
         yield Reset(run)
     elif not run.taken_over:
@@ -221,12 +230,12 @@ def _clean_up(view: RunView) -> Iterator[Action]:
         yield CleanUp(run, None)
 
 
-def _live(view: RunView) -> Iterator[Action]:
+def _live(view: RunView, user: str) -> Iterator[Action]:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     match run.state:
         case RunState.CLAIMED:
-            yield claimed(view)
+            yield claimed(view, user)
         case RunState.PROVISIONING:
             yield Provision(run)
         case RunState.RUNNING | RunState.WAITING | RunState.COMPLETING:
@@ -243,14 +252,14 @@ def _live(view: RunView) -> Iterator[Action]:
                 yield from _starting(view)
 
 
-def claimed(view: RunView) -> Action:
+def claimed(view: RunView, user: str) -> Action:
     run, ticket = view.run, view.ticket
     assert ticket is not None
     # In Progress is where the claim itself put it, before a crash.
     claimed_before = ticket.status == IN_PROGRESS
     labels = ticket.labels - {NEEDS_HUMAN} if claimed_before else ticket.labels
     status = TODO if claimed_before else ticket.status
-    if reason := _not_eligible(status, labels, ticket.is_open):
+    if reason := _not_eligible(status, labels, ticket.is_open, user in ticket.assignees, user):
         return Drop(run, reason)
     if ticket.presence is not Presence.ON or ticket.transferred:
         return Drop(run, "the ticket is not on the board")
@@ -419,7 +428,9 @@ def finished(view: RunView) -> bool:
 # --- tickets without a run ----------------------------------------------------------------
 
 
-def _not_eligible(status: str | None, labels: frozenset[str], is_open: bool) -> str | None:
+def _not_eligible(
+    status: str | None, labels: frozenset[str], is_open: bool, assigned: bool, user: str
+) -> str | None:
     if not is_open:
         return "the issue is closed"
     if status != TODO:
@@ -428,12 +439,20 @@ def _not_eligible(status: str | None, labels: frozenset[str], is_open: bool) -> 
         return f"the ticket has no `{LABEL}` label"
     if NEEDS_HUMAN in labels:
         return f"the ticket has the `{NEEDS_HUMAN}` label"
+    if not assigned:
+        return f"the ticket is not assigned to {user}"
     return None
+
+
+def _ready(item: Item, snapshot: Snapshot) -> str | None:
+    """Why a ticket without a run is not ready to be picked, regardless of its repo."""
+    assigned = snapshot.user in item.assignees
+    return _not_eligible(item.status, item.labels, item.is_open, assigned, snapshot.user)
 
 
 def eligible(item: Item, snapshot: Snapshot) -> bool:
     return (
-        _not_eligible(item.status, item.labels, item.is_open) is None
+        _ready(item, snapshot) is None
         and item.repo_ref in snapshot.listed
         and not _on_several(item, snapshot)
         and item.ticket_ref not in _current(snapshot)
@@ -446,8 +465,19 @@ def unlisted(snapshot: Snapshot) -> list[Item]:
         item
         for board in snapshot.boards
         for item in board.items
-        if _not_eligible(item.status, item.labels, item.is_open) is None
-        and item.repo_ref not in snapshot.listed
+        if _ready(item, snapshot) is None and item.repo_ref not in snapshot.listed
+    ]
+
+
+def not_assigned(snapshot: Snapshot) -> list[Item]:
+    """Tickets that would be ready but are not assigned to the user: shown by ``status``."""
+    return [
+        item
+        for board in snapshot.boards
+        for item in board.items
+        if snapshot.user not in item.assignees
+        and _not_eligible(item.status, item.labels, item.is_open, True, snapshot.user) is None
+        and item.repo_ref in snapshot.listed
     ]
 
 
@@ -467,6 +497,8 @@ def _flags(snapshot: Snapshot) -> Iterator[Action]:
         for item in board.items:
             if LABEL not in item.labels or not item.is_open or item.ticket_ref in current:
                 continue
+            if snapshot.user not in item.assignees:
+                continue  # someone else's ticket: never touched
             if item.status == TODO and _on_several(item, snapshot):
                 key = f"boards:{item.ticket_ref}"
                 text = (

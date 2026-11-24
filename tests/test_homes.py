@@ -11,7 +11,9 @@ OTHER = "https://github.com/users/me/projects/2"
 
 
 def set_up(home: Path, *boards: str) -> Path:
-    config = parse_config({"boards": [{"url": b} for b in boards], "repos": [{"path": "~/web"}]})
+    config = parse_config(
+        {"user": "me", "boards": [{"url": b} for b in boards], "repos": [{"path": "~/web"}]}
+    )
     save_config(config, Paths(home).config)
     return home
 

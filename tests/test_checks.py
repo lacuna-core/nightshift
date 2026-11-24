@@ -27,6 +27,7 @@ ALL = frozenset({"nightshift", "nightshift:needs-human"})
 class FakeTracker:
     def __init__(self) -> None:
         self.scopes: frozenset[str] | None = frozenset({"repo", "project"})
+        self.users = {"me", "someone"}
         self.login_error: NightshiftError | None = None
         self.info = RepoInfo("acme/web", "R_1", "main", True, ALL)
         self.overview: BoardOverview | NightshiftError = BoardOverview(
@@ -43,7 +44,10 @@ class FakeTracker:
             raise TrackerNotFoundError("no")
         return self.info
 
-    def board_overview(self, url: str) -> BoardOverview:
+    def user_exists(self, login: str) -> bool:
+        return login in self.users
+
+    def board_overview(self, url: str, user: str = "") -> BoardOverview:
         if isinstance(self.overview, NightshiftError):
             raise self.overview
         return self.overview
@@ -80,6 +84,7 @@ def run(
     version: str = "0.1.18",
     home: Path | None = None,
     homes: Homes | None = None,
+    user: str = "me",
 ) -> Report:
     tools = FakeRunner(
         {
@@ -88,7 +93,7 @@ def run(
         }
     )
     config: ProjectConfig = parse_config(
-        {"boards": [{"url": BOARD}], "repos": [{"path": str(c)} for c in clones]}
+        {"user": user, "boards": [{"url": BOARD}], "repos": [{"path": str(c)} for c in clones]}
     )
     claude = Claude(tools, home or clones[0].parent)
     checks = Checks(tracker, Herdr(tools), claude, Git(proc.run), homes)
@@ -217,7 +222,7 @@ def test_board_listed_by_another_home(clone: Path, tmp_path: Path) -> None:
     register = tmp_path / "homes.json"
     other = tmp_path / "other-home"
     save_config(
-        parse_config({"boards": [{"url": BOARD}], "repos": [{"path": str(clone)}]}),
+        parse_config({"user": "me", "boards": [{"url": BOARD}], "repos": [{"path": str(clone)}]}),
         Paths(other).config,
     )
     Homes(register, other).record()
@@ -226,3 +231,17 @@ def test_board_listed_by_another_home(clone: Path, tmp_path: Path) -> None:
     assert not report.fatal
     assert not report.boards[0].usable
     assert texts(report, Level.FAIL) == [f"also listed by the Nightshift in {other.resolve()}"]
+
+
+def test_user_that_does_not_exist_fails(clone: Path) -> None:
+    report = run(FakeTracker(), clone, user="ghost")
+    assert report.fatal
+    assert texts(report, Level.FAIL) == ["user ghost does not exist on GitHub"]
+
+
+def test_user_other_than_the_gh_login_is_a_warning(clone: Path) -> None:
+    report = run(FakeTracker(), clone, user="someone")
+    assert not report.failed
+    assert texts(report, Level.WARN) == [
+        "picks up tickets assigned to someone, but agents act as me"
+    ]

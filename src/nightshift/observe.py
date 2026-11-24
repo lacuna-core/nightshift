@@ -159,6 +159,7 @@ class Observer:
             usage_limit=self._usage_limit(),
             ready=herdr_ok and claude_ok,
             signalled=frozenset(key.removeprefix("flag:") for key in self._store.items("flag:")),
+            user=self._config.user.lower(),
         )
 
     def _usage_limit(self) -> UsageLimit | None:

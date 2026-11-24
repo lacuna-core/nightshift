@@ -295,6 +295,7 @@ def test_lower_limit_stops_picking_only(world: World) -> None:
 def test_unlisted_runs(world: World, issue: Issue) -> None:
     config = parse_config(
         {
+            "user": "me",
             "boards": [{"url": BOARD_2}],
             "repos": [{"path": str(r.path)} for r in world.config.repos],
         }

@@ -25,6 +25,7 @@ def test_example_from_spec(tmp_path: Path) -> None:
         write(
             tmp_path / "nightshift.yaml",
             """
+user: you
 boards:
   - url: https://github.com/users/you/projects/1
   - url: https://github.com/orgs/acme/projects/2/views/3
@@ -49,32 +50,60 @@ repos:
     [
         (None, "boards"),
         ({}, "boards: is missing"),
-        ({"boards": [], "repos": [{"path": "/a"}]}, "boards: "),
-        ({"boards": [{"url": BOARD}], "repos": [{"path": "/a"}], "x": 1}, "x: unknown key"),
+        ({"boards": [{"url": BOARD}], "repos": [{"path": "/a"}]}, "user: is missing"),
+        ({"user": "no spaces", "boards": [{"url": BOARD}], "repos": [{"path": "/a"}]}, "user: "),
+        ({"user": "me", "boards": [], "repos": [{"path": "/a"}]}, "boards: "),
         (
-            {"boards": [{"url": BOARD, "agents": 1}], "repos": [{"path": "/a"}]},
+            {"user": "me", "boards": [{"url": BOARD}], "repos": [{"path": "/a"}], "x": 1},
+            "x: unknown key",
+        ),
+        (
+            {"user": "me", "boards": [{"url": BOARD, "agents": 1}], "repos": [{"path": "/a"}]},
             "boards[0].agents: unknown key",
         ),
         (
-            {"boards": [{"url": BOARD, "max_parallel_agents": 0}], "repos": [{"path": "/a"}]},
+            {
+                "user": "me",
+                "boards": [{"url": BOARD, "max_parallel_agents": 0}],
+                "repos": [{"path": "/a"}],
+            },
             "boards[0].max_parallel_agents: ",
         ),
         (
-            {"boards": [{"url": BOARD, "max_parallel_agents": True}], "repos": [{"path": "/a"}]},
+            {
+                "user": "me",
+                "boards": [{"url": BOARD, "max_parallel_agents": True}],
+                "repos": [{"path": "/a"}],
+            },
             "boards[0].max_parallel_agents: ",
         ),
-        ({"boards": [{"url": "https://x.org"}], "repos": [{"path": "/a"}]}, "boards[0].url: "),
-        ({"boards": [{"url": BOARD}], "repos": [{"path": "a"}]}, "repos[0].path: "),
         (
-            {"boards": [{"url": BOARD}], "repos": [{"path": "/a", "stall_timeout": 40}]},
+            {"user": "me", "boards": [{"url": "https://x.org"}], "repos": [{"path": "/a"}]},
+            "boards[0].url: ",
+        ),
+        ({"user": "me", "boards": [{"url": BOARD}], "repos": [{"path": "a"}]}, "repos[0].path: "),
+        (
+            {
+                "user": "me",
+                "boards": [{"url": BOARD}],
+                "repos": [{"path": "/a", "stall_timeout": 40}],
+            },
             "repos[0].stall_timeout: ",
         ),
         (
-            {"boards": [{"url": BOARD}, {"url": BOARD + "/"}], "repos": [{"path": "/a"}]},
+            {
+                "user": "me",
+                "boards": [{"url": BOARD}, {"url": BOARD + "/"}],
+                "repos": [{"path": "/a"}],
+            },
             "boards[1].url: ",
         ),
         (
-            {"boards": [{"url": BOARD}], "repos": [{"path": "/a"}, {"path": "/b/../a"}]},
+            {
+                "user": "me",
+                "boards": [{"url": BOARD}],
+                "repos": [{"path": "/a"}, {"path": "/b/../a"}],
+            },
             "repos[1].path: ",
         ),
     ],
@@ -106,6 +135,7 @@ def test_bad_durations(value: object) -> None:
 def test_save_leaves_out_defaults_and_keeps_the_rest(tmp_path: Path) -> None:
     config = parse_config(
         {
+            "user": "me",
             "boards": [{"url": BOARD, "max_parallel_agents": 2}],
             "repos": [
                 {"path": "~/dev/a", "stall_timeout": "40m"},
@@ -116,6 +146,7 @@ def test_save_leaves_out_defaults_and_keeps_the_rest(tmp_path: Path) -> None:
     path = tmp_path / "new" / "nightshift.yaml"
     save_config(config, path)
     assert path.read_text() == (
+        "user: me\n"
         f"boards:\n- url: {BOARD}\n  max_parallel_agents: 2\n"
         "repos:\n- path: ~/dev/a\n  stall_timeout: 40m\n- path: /srv/b\n"
     )
