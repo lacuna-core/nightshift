@@ -66,6 +66,7 @@ def ticket(status: str | None = "In Progress", *prs: Pr, **changes: Any) -> Tick
         "label_removed": False,
         "prs": prs,
         "repo": "acme/web",
+        "assignees": frozenset({"me"}),
     }
     return TicketFacts(**(values | changes))
 
@@ -97,6 +98,7 @@ def item(number: int = 42, status: str | None = "Todo", **changes: Any) -> Item:
         "title": f"Ticket {number}",
         "labels": frozenset({"nightshift"}),
         "boards": frozenset({BOARD.lower()}),
+        "assignees": frozenset({"me"}),
     }
     return Item(**(values | changes))
 
@@ -112,5 +114,6 @@ def snapshot(*views: RunView, boards: tuple[Board, ...] = (), **changes: Any) ->
         "runs": views,
         "limits": {BOARD: 2, OTHER_BOARD: 2},
         "listed": {"R_web": "/dev/web", "R_api": "/dev/api"},
+        "user": "me",
     }
     return Snapshot(**(values | changes))

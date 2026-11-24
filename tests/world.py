@@ -50,6 +50,10 @@ class Issue:
     labels: set[str] = field(default_factory=lambda: {"nightshift"})
     is_open: bool = True
     label_removed_at: datetime | None = None
+    assignees: set[str] = field(default_factory=lambda: {"me"})
+    unassigned_at: datetime | None = None
+    """When ``me`` was last removed as assignee."""
+
     comments: list[str] = field(default_factory=list)
     prs: dict[str, list[Pr]] = field(default_factory=dict)
 
@@ -110,6 +114,7 @@ class FakeTracker:
                     title=issue.title,
                     labels=frozenset(issue.labels),
                     boards=frozenset(u.lower() for u in issue.status),
+                    assignees=frozenset(issue.assignees),
                 )
             )
         return Board(url, tuple(items))
@@ -136,6 +141,12 @@ class FakeTracker:
                 and issue.label_removed_at >= run.created_at,
                 prs=tuple(issue.prs.get(run.branch or "", ())),
                 repo=issue.repo,
+                assignees=frozenset(issue.assignees),
+                unassigned=frozenset(
+                    {"me"}
+                    if issue.unassigned_at is not None and issue.unassigned_at >= run.created_at
+                    else ()
+                ),
             )
         return facts
 
@@ -422,6 +433,7 @@ class World:
             git(tmp / name, "push", "-q", "origin", "HEAD:main")
         self.config: ProjectConfig = parse_config(
             {
+                "user": "me",
                 "boards": [
                     {"url": BOARD, "max_parallel_agents": limit},
                     {"url": BOARD_2, "max_parallel_agents": limit},
@@ -448,7 +460,7 @@ class World:
         self.executor = Executor(
             store=self.store, tracker=self.tracker, herdr=Herdr(self.hc), git=self.git,
             claude=self._claude(), cleanup=Cleanup(Herdr(self.hc), self._claude(), self.git), notifier=self.notifier, paths=self.paths, repos=self.observer.repo,
-            now=lambda: self.clock, sleep=lambda seconds: None,
+            now=lambda: self.clock, sleep=lambda seconds: None, user=self.config.user,
         )  # fmt: skip
         self.loop = Loop(
             store=self.store, observer=self.observer, executor=self.executor, stop=self.stop,

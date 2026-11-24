@@ -138,7 +138,9 @@ def test_repo_info() -> None:
     assert info.labels == {"nightshift"}
 
 
-def issue(repo: str, *labels: str, state: str = "OPEN") -> dict[str, Any]:
+def issue(
+    repo: str, *labels: str, state: str = "OPEN", assignees: tuple[str, ...] = ()
+) -> dict[str, Any]:
     return {
         "id": "I",
         "isArchived": False,
@@ -147,6 +149,7 @@ def issue(repo: str, *labels: str, state: str = "OPEN") -> dict[str, Any]:
             "state": state,
             "repository": {"nameWithOwner": repo},
             "labels": {"nodes": [{"name": label} for label in labels]},
+            "assignees": {"nodes": [{"login": login} for login in assignees]},
         },
     }
 
@@ -497,3 +500,43 @@ def test_labels() -> None:
     tracker.remove_label(run(), "nightshift:needs-human")
     path = "/repos/acme/web/issues/42/labels"
     assert seen == [("POST", path), ("DELETE", f"{path}/nightshift%3Aneeds-human")]
+
+
+def test_board_overview_counts_tickets_assigned_to_the_user() -> None:
+    overview = answers(
+        page(
+            issue("acme/web", "nightshift", assignees=("Me",)),
+            issue("acme/web", "nightshift", assignees=("someone",)),
+            issue("acme/web", assignees=("me",)),
+        )
+    ).board_overview(BOARD, "me")
+    assert overview.issues == {"acme/web": IssueCount(3, 2, 1)}
+
+
+def test_user_exists() -> None:
+    assert answers({"data": {"user": {"login": "me"}}}).user_exists("me")
+    assert not answers({"data": {"user": None}}).user_exists("nobody")
+
+
+def test_read_board_keeps_the_assignees() -> None:
+    node = candidate(7)
+    node["content"]["assignees"] = {"nodes": [{"login": "Me"}, {"login": "Other"}]}
+    board = answers(board_page(node)).read_board(BOARD)
+    assert board.items[0].assignees == {"me", "other"}
+
+
+def test_ticket_facts_assignees_and_who_was_unassigned_since_the_run_started() -> None:
+    events = {
+        "nodes": [
+            {"createdAt": "2026-11-22T01:00:00Z", "assignee": {"login": "Early"}},
+            {"createdAt": "2026-11-22T02:30:00Z", "assignee": {"login": "Me"}},
+            {"createdAt": "2026-11-22T02:40:00Z", "assignee": {}},
+            {"createdAt": "2026-11-22T02:50:00Z", "label": {"name": "bug"}},
+        ]
+    }
+    facts = facts_of(
+        issue_node(assignees={"nodes": [{"login": "Me"}]}, timelineItems=events), repo_node()
+    )
+    assert facts.assignees == {"me"}
+    assert facts.unassigned == {"me"}
+    assert not facts.label_removed

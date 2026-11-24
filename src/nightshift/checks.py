@@ -71,6 +71,7 @@ class Report:
     """GitHub could not be reached, so repos and boards could not be checked."""
 
     listed: frozenset[str] = field(default_factory=frozenset)
+    user: str = ""
 
     @property
     def fatal(self) -> bool:
@@ -89,8 +90,9 @@ class Report:
 
 class SetupTracker(Protocol):
     def login(self) -> tuple[str, frozenset[str] | None]: ...
+    def user_exists(self, login: str) -> bool: ...
     def repo_info(self, slug: str) -> RepoInfo: ...
-    def board_overview(self, url: str) -> BoardOverview: ...
+    def board_overview(self, url: str, user: str = "") -> BoardOverview: ...
 
 
 class Checks:
@@ -110,16 +112,18 @@ class Checks:
 
     def run(self, config: ProjectConfig) -> Report:
         tools = [self._herdr_check(), self._claude_check()]
-        github, available = self._github_check()
+        github, available, login = self._github_check()
         tools.append(github)
         if github.level is Level.FAIL or not available:
             return Report(tuple(tools), unavailable=not available)
+        tools.append(self._user_check(config.user, login))
         repos = self._repos(config)
         elsewhere = self._homes.boards_elsewhere() if self._homes else {}
         return Report(
             tuple(tools),
             repos,
-            tuple(self._shared(self._board(b.url), elsewhere) for b in config.boards),
+            tuple(self._shared(self._board(b.url, config.user), elsewhere) for b in config.boards),
+            user=config.user,
             listed=frozenset(r.info.slug for r in repos if r.info),
         )
 
@@ -149,17 +153,21 @@ class Checks:
                 Level.FAIL, f"Claude Code: {e}", "Install Claude Code and log in with `claude`."
             )
 
-    def _github_check(self) -> tuple[Finding, bool]:
+    def _github_check(self) -> tuple[Finding, bool, str]:
         try:
             login, scopes = self._tracker.login()
         except TrackerUnavailableError as e:
-            return Finding(Level.WARN, f"GitHub: {e}", "Try again later."), False
+            return Finding(Level.WARN, f"GitHub: {e}", "Try again later."), False, ""
         except ToolError as e:
-            return Finding(Level.FAIL, f"GitHub: {e}", "Install the GitHub CLI, `gh`."), True
+            return Finding(Level.FAIL, f"GitHub: {e}", "Install the GitHub CLI, `gh`."), True, ""
         except NightshiftError as e:
-            return Finding(
-                Level.FAIL, f"GitHub: {e}", "Run `gh auth login -h github.com -s project`."
-            ), True
+            return (
+                Finding(
+                    Level.FAIL, f"GitHub: {e}", "Run `gh auth login -h github.com -s project`."
+                ),
+                True,
+                "",
+            )
         if scopes is not None and not {"project", "repo"} <= scopes:
             missing = ", ".join(sorted({"project", "repo"} - scopes))
             return (
@@ -169,8 +177,29 @@ class Checks:
                     "Run `gh auth refresh -h github.com -s project,repo`.",
                 ),
                 True,
+                login,
             )
-        return Finding(Level.OK, f"GitHub as {login}"), True
+        return Finding(Level.OK, f"GitHub as {login}"), True, login
+
+    def _user_check(self, user: str, login: str) -> Finding:
+        """Only tickets assigned to ``user`` are picked up; agents act as the ``gh`` login."""
+        try:
+            exists = self._tracker.user_exists(user)
+        except NightshiftError as e:
+            return Finding(Level.WARN, f"user {user}: {e}", "Try again later.")
+        if not exists:
+            return Finding(
+                Level.FAIL,
+                f"user {user} does not exist on GitHub",
+                "Set `user` in nightshift.yaml to your GitHub login.",
+            )
+        if login and user.lower() != login.lower():
+            return Finding(
+                Level.WARN,
+                f"picks up tickets assigned to {user}, but agents act as {login}",
+                "Set `user` to your `gh` login, or log `gh` in as that user.",
+            )
+        return Finding(Level.OK, f"picks up tickets assigned to {user}")
 
     # --- repos ------------------------------------------------------------------------
 
@@ -275,9 +304,9 @@ class Checks:
         )
         return BoardReport(report.url, (*report.findings, finding), report.overview)
 
-    def _board(self, url: str) -> BoardReport:
+    def _board(self, url: str, user: str) -> BoardReport:
         try:
-            overview = self._tracker.board_overview(url)
+            overview = self._tracker.board_overview(url, user)
         except TrackerAuthError as e:
             return BoardReport(
                 url,

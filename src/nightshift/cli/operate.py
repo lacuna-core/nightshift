@@ -187,6 +187,10 @@ def _status(store: Store, config: ProjectConfig) -> None:
         console.print(
             f"[yellow]Not listed[/] {escape(ticket)} is ready, but its repo is not listed"
         )
+    for ticket in report.get("not_assigned", []):
+        console.print(
+            f"[yellow]Not yours[/]  {escape(ticket)} is ready, but not assigned to {config.user}"
+        )
 
     shown = [r for r in runs if r.state is not RunState.DISCARDED and not r.cleaned_up_at]
     for repo in sorted({r.repo for r in shown}):

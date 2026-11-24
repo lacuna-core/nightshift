@@ -82,16 +82,17 @@ def _ask(boundaries: Boundaries, current: ProjectConfig | None) -> ProjectConfig
     from nightshift.errors import ConfigError
 
     while True:
+        user = _ask_user(boundaries, current)
         boards = _ask_boards(boundaries, current)
         repos = _ask_repos(current)
         try:
-            return _combine(boards, repos, current)
+            return _combine(user, boards, repos, current)
         except ConfigError as e:
             console.print(f"[red]problem[/] {escape(str(e))}\nTry again.")
 
 
 def _combine(
-    boards: list[tuple[str, int]], repos: list[str], current: ProjectConfig | None
+    user: str, boards: list[tuple[str, int]], repos: list[str], current: ProjectConfig | None
 ) -> ProjectConfig:
     """The answers as a config, with the optional settings the current file has."""
     from nightshift.project_config import format_duration, parse_config
@@ -106,10 +107,38 @@ def _combine(
         entries.append(entry)
     return parse_config(
         {
+            "user": user,
             "boards": [{"url": url, "max_parallel_agents": limit} for url, limit in boards],
             "repos": entries,
         }
     )
+
+
+def _ask_user(boundaries: Boundaries, current: ProjectConfig | None) -> str:
+    """Whose tickets are picked up. Suggested: the current value, else the git user (git's
+    ``github.user``, or ``user.name`` if it looks like a GitHub login), else the `gh` login.
+    """
+    import contextlib
+
+    from nightshift.errors import NightshiftError
+    from nightshift.project_config import is_login
+
+    login: str | None = None
+    with contextlib.suppress(NightshiftError):
+        login = boundaries.tracker.login()[0] or None
+    git_user = next(
+        (
+            value
+            for key in ("github.user", "user.name")
+            if (value := boundaries.git.config(key, Path.cwd())) and is_login(value)
+        ),
+        None,
+    )
+    default = current.user if current else git_user or login
+    if default and login and default.lower() != login.lower():
+        console.print(f"[yellow]Note[/] `gh` is logged in as {escape(login)}: agents act as them.")
+    answer = typer.prompt("GitHub login whose assigned tickets are picked up", default=default)
+    return str(answer).strip()
 
 
 def _ask_boards(boundaries: Boundaries, current: ProjectConfig | None) -> list[tuple[str, int]]:

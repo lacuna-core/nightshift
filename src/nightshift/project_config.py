@@ -28,6 +28,7 @@ _BOARD_URL = re.compile(
     r"https://github\.com/(?P<kind>users|orgs)/(?P<owner>[A-Za-z0-9-]+)"
     r"/projects/(?P<number>[1-9][0-9]*)(?:/.*)?"
 )
+_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 _DURATION = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 
 
@@ -62,6 +63,11 @@ class Paths:
     @property
     def worktrees(self) -> Path:
         return self.root / "worktrees"
+
+
+def is_login(value: str) -> bool:
+    """Does it look like a GitHub login?"""
+    return _LOGIN.fullmatch(value) is not None
 
 
 def parse_duration(value: Any) -> timedelta:
@@ -136,8 +142,19 @@ class RepoConfig(_Model):
 
 
 class ProjectConfig(_Model):
+    user: str
+    """The GitHub login whose tickets Nightshift picks up: only tickets assigned to them."""
+
     boards: list[BoardConfig] = Field(min_length=1)
     repos: list[RepoConfig] = Field(min_length=1)
+
+    @field_validator("user")
+    @classmethod
+    def _login(cls, value: str) -> str:
+        value = value.strip().removeprefix("@")
+        if not _LOGIN.fullmatch(value):
+            raise ValueError("must be a GitHub login, such as octocat")
+        return value
 
     @model_validator(mode="after")
     def _no_duplicates(self) -> ProjectConfig:

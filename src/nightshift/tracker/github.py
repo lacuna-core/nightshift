@@ -47,11 +47,12 @@ _MARKER = "nightshift"
 _STATUS = 'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}'
 _ISSUE_FRAGMENT = (
     " fragment issue on Issue{id state labels(first:100){nodes{name}} "
-    "repository{id nameWithOwner} "
+    "assignees(first:20){nodes{login}} repository{id nameWithOwner} "
     "projectItems(first:50,includeArchived:true){pageInfo{hasNextPage} "
     f"nodes{{id isArchived project{{url}} {_STATUS}}}}} "
-    "timelineItems(last:100,itemTypes:[UNLABELED_EVENT])"
-    "{nodes{... on UnlabeledEvent{createdAt label{name}}}}}"
+    "timelineItems(last:100,itemTypes:[UNLABELED_EVENT,UNASSIGNED_EVENT])"
+    "{nodes{... on UnlabeledEvent{createdAt label{name}} "
+    "... on UnassignedEvent{createdAt assignee{... on User{login}}}}}}"
 )
 _PR_FRAGMENT = (
     " fragment pr on PullRequest{id url state isDraft isCrossRepository baseRefName "
@@ -216,14 +217,18 @@ class GitHub:
 
     # --- boards -----------------------------------------------------------------------
 
-    def board_overview(self, url: str) -> BoardOverview:
+    def user_exists(self, login: str) -> bool:
+        data = self.graphql("query($l:String!){user(login:$l){login}}", {"l": login}, partial=True)
+        return bool(data.get("user"))
+
+    def board_overview(self, url: str, user: str = "") -> BoardOverview:
         statuses: tuple[str, ...] = ()
         counts: dict[str, IssueCount] = {}
         for project in self._board_pages(
             url,
             'field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}}',
             "content{__typename ... on Issue{state repository{nameWithOwner} "
-            "labels(first:100){nodes{name}}}}",
+            "labels(first:100){nodes{name}} assignees(first:20){nodes{login}}}}",
         ):
             statuses = tuple(o["name"] for o in (project["field"] or {}).get("options", []))
             for item in project["items"]["nodes"]:
@@ -233,7 +238,10 @@ class GitHub:
                 slug = issue["repository"]["nameWithOwner"]
                 count = counts.get(slug, IssueCount())
                 labelled = LABEL in (n["name"] for n in issue["labels"]["nodes"])
-                counts[slug] = IssueCount(count.open + 1, count.labelled + labelled)
+                assigned = labelled and user.lower() in _logins(issue)
+                counts[slug] = IssueCount(
+                    count.open + 1, count.labelled + labelled, count.assigned + assigned
+                )
         return BoardOverview(url, statuses, dict(sorted(counts.items())))
 
     def read_board(self, url: str) -> Board:
@@ -244,6 +252,7 @@ class GitHub:
             'field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}}',
             _STATUS + " content{__typename ... on Issue{id number title state "
             "repository{id nameWithOwner} labels(first:100){nodes{name}} "
+            "assignees(first:20){nodes{login}} "
             "projectItems(first:20){nodes{isArchived project{url}}}}}",
             f'is:issue is:open label:{LABEL} status:"{TODO}","{IN_PROGRESS}"',
         ):
@@ -480,6 +489,12 @@ def _status(node: dict[str, Any]) -> str | None:
     return (node.get("fieldValueByName") or {}).get("name")
 
 
+def _logins(issue: dict[str, Any]) -> frozenset[str]:
+    return frozenset(
+        n["login"].lower() for n in (issue.get("assignees") or {}).get("nodes", []) if n
+    )
+
+
 def _item(node: dict[str, Any], url: str, rank: int) -> Item | None:
     issue = node["content"]
     if node["isArchived"] or not issue or issue["__typename"] != "Issue":
@@ -501,6 +516,7 @@ def _item(node: dict[str, Any], url: str, rank: int) -> Item | None:
             for p in issue["projectItems"]["nodes"]
             if p and not p["isArchived"]
         ),
+        assignees=_logins(issue),
     )
     wanted = item.is_open and LABEL in item.labels and item.status in (TODO, IN_PROGRESS)
     return item if wanted else None
@@ -545,6 +561,14 @@ def _facts(
         ),
         transferred=issue["repository"]["id"] != run.repo_ref,
         repo=issue["repository"]["nameWithOwner"],
+        assignees=_logins(issue),
+        unassigned=frozenset(
+            event["assignee"]["login"].lower()
+            for event in issue["timelineItems"]["nodes"]
+            if event
+            and (event.get("assignee") or {}).get("login")
+            and _time(event["createdAt"]) >= run.created_at
+        ),
     )
 
 

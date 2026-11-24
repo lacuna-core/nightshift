@@ -136,6 +136,7 @@ class Executor:
         repos: Callable[[str], RepoState | None],
         now: Callable[[], datetime],
         sleep: Callable[[float], None],
+        user: str,
     ) -> None:
         self._store = store
         self._tracker = tracker
@@ -148,6 +149,7 @@ class Executor:
         self._repos = repos
         self._now = now
         self._sleep = sleep
+        self._user = user.lower()
         self.repo_problems: dict[str, str] = {}
 
     # --- carrying out -----------------------------------------------------------------
@@ -188,8 +190,8 @@ class Executor:
                 self._wait(self._fresh(run), event, reason)
             case Finish(run, reason):
                 self._to(run, RunState.DONE, state_reason=reason, ended_at=self._now())
-            case TakeOver(run):
-                self._take_over(run)
+            case TakeOver(run, reason):
+                self._take_over(run, reason)
             case Reset(run):
                 self._reset(run)
             case CleanUp(run, merged):
@@ -336,7 +338,7 @@ class Executor:
         if run.state is not RunState.CLAIMED:
             return
         facts = self._reread(run)
-        decision = decide.claimed(RunView(run, facts))
+        decision = decide.claimed(RunView(run, facts), self._user)
         if isinstance(decision, Drop):
             self._dispatch(decision)
             return
@@ -516,8 +518,8 @@ class Executor:
             turn = self._agent(run).turn
             self._store.update_run(run, stop_requested_at=None, turn_at_end=turn)
 
-    def _take_over(self, run: Run) -> None:
-        text = (
+    def _take_over(self, run: Run, reason: str) -> None:
+        text = reason or (
             f"The `{LABEL}` label was removed, so this is yours now. Nightshift leaves the "
             "agent's tab, the worktree, the branch and the pull request alone."
         )

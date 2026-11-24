@@ -33,6 +33,7 @@ nightshift start    # runs in the foreground
 
 ```yaml
 # ~/.nightshift/nightshift.yaml
+user: <your-github-login>     # only tickets assigned to this login are picked up
 boards:
   - url: https://github.com/users/<you>/projects/<n>
     max_parallel_agents: 2    # optional, default 5
@@ -54,10 +55,10 @@ be listed in one home only; `nightshift check` reports a board that another home
 
 | You | Nightshift |
 |-----|------------|
-| Add the `nightshift` label to a Todo ticket | Picks it when its rank comes up and a slot is free |
+| Add the `nightshift` label to a Todo ticket assigned to you (`user`) | Picks it when its rank comes up and a slot is free |
 | Answer or approve in the agent's tab | Goes on, and removes `nightshift:needs-human` |
 | Move a ticket back to Todo | Starts over: closes the old PR, keeps its branch, makes a new one |
-| Remove the `nightshift` label | Stops the agent and leaves everything to you |
+| Remove the `nightshift` label, or unassign yourself | Stops the agent and leaves everything to you |
 | Merge the PR | Removes the worktree and the local branch, when nothing can be lost |
 | Move the ticket elsewhere, or close the issue or the PR | Stops the agent and keeps everything |
 

@@ -36,6 +36,11 @@ class Git:
             and lines[1] == lines[2]
         )
 
+    def config(self, key: str, cwd: Path) -> str | None:
+        """A git setting as git sees it in ``cwd``, or None if it is not set."""
+        result = self._git(cwd, "config", "--get", key)
+        return result.out.strip() or None if result.code == 0 else None
+
     def origin(self, path: Path) -> str | None:
         result = self._git(path, "remote", "get-url", "origin")
         return result.out.strip() or None if result.code == 0 else None

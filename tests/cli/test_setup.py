@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -27,7 +28,10 @@ def handler(request: httpx.Request) -> httpx.Response:
         created.append(json.loads(request.content)["name"])
         return httpx.Response(201, json={})
     query = json.loads(request.content)["query"]
-    if "viewer{" in query:
+    data: dict[str, Any]
+    if "user(login:$l)" in query:
+        data = {"user": {"login": "me"}}
+    elif "viewer{" in query:
         node = {"url": BOARD, "title": "Factory", "closed": False}
         data = {"viewer": {"projectsV2": {"nodes": [node]}, "organizations": {"nodes": []}}}
     elif "repository(owner" in query:
@@ -53,12 +57,19 @@ def handler(request: httpx.Request) -> httpx.Response:
 
 
 created: list[str] = []
+git_config: dict[str, str] = {}
+
+
+def git_setting(args: list[str]) -> Result:
+    value = git_config.get(args[-1])
+    return Result(0, value + "\n", "") if value else Result(1, "", "")
 
 
 @pytest.fixture(autouse=True)
 def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     home = tmp_path
     created.clear()
+    git_config.clear()
     monkeypatch.setenv("HOME", str(home))
     tools = FakeRunner(
         {
@@ -66,6 +77,7 @@ def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
             "claude --version": ok("2"),
             "gh auth token": ok("t"),
             "git": lambda args: proc.run(args, cwd=home / "web"),
+            "git config --get": git_setting,
         }
     )
 
@@ -79,9 +91,10 @@ def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 def test_init_then_check(world: Path, clone: Path) -> None:  # noqa: F811
-    result = runner.invoke(app, ["init"], input=f"1\n2\n{clone}\n")
+    result = runner.invoke(app, ["init"], input=f"\n1\n2\n{clone}\n")
     assert result.exit_code == 0, result.output
     config = load_config(world / ".nightshift" / "nightshift.yaml")
+    assert config.user == "me"  # the gh login, since git has no usable user
     assert config.boards[0].url == BOARD
     assert config.boards[0].max_parallel_agents == 2
     assert created == ["nightshift", "nightshift:needs-human"]
@@ -96,20 +109,20 @@ def test_init_again_keeps_optional_settings(world: Path, clone: Path) -> None:  
     path = world / ".nightshift" / "nightshift.yaml"
     path.parent.mkdir()
     path.write_text(
-        f"boards:\n- url: {BOARD}\n  max_parallel_agents: 3\n"
+        f"user: me\nboards:\n- url: {BOARD}\n  max_parallel_agents: 3\n"
         f"repos:\n- path: {clone}\n  stall_timeout: 40m\n"
     )
     before = load_config(path)
-    result = runner.invoke(app, ["init"], input="\n\n\nn\n")
+    result = runner.invoke(app, ["init"], input="\n\n\n\nn\n")
     assert result.exit_code == 1
-    result = runner.invoke(app, ["init", "--yes"], input="\n\n\n")
+    result = runner.invoke(app, ["init", "--yes"], input="\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert load_config(path) == before
 
 
 def test_init_writes_also_if_a_check_fails(world: Path) -> None:
     (world / "web").mkdir()
-    result = runner.invoke(app, ["init"], input=f"{BOARD}\n\n{world / 'web'}\n")
+    result = runner.invoke(app, ["init"], input=f"\n{BOARD}\n\n{world / 'web'}\n")
     assert result.exit_code == 1
     assert (world / ".nightshift" / "nightshift.yaml").exists()
 
@@ -122,3 +135,34 @@ def test_check_without_config() -> None:
 
 def test_fake_runner_is_strict() -> None:
     assert FakeRunner({})(["x"]) == Result(127, "", "unexpected: x")
+
+
+@pytest.mark.parametrize(
+    ("settings", "suggested"),
+    [
+        ({"user.name": "octocat"}, "octocat"),
+        ({"github.user": "hubber", "user.name": "octocat"}, "hubber"),
+        ({"user.name": "Octo Cat"}, "me"),  # a display name, not a login: the gh login
+        ({}, "me"),
+    ],
+)
+def test_init_suggests_the_git_user(
+    world: Path,
+    clone: Path,  # noqa: F811
+    settings: dict[str, str],
+    suggested: str,
+) -> None:
+    git_config.update(settings)
+    result = runner.invoke(app, ["init"], input=f"\n1\n2\n{clone}\n")
+    assert f"picked up [{suggested}]" in result.output
+    assert load_config(world / ".nightshift" / "nightshift.yaml").user == suggested
+    assert ("logged in as me" in result.output) == (suggested != "me")
+
+
+def test_init_again_suggests_the_current_user(world: Path, clone: Path) -> None:  # noqa: F811
+    git_config["user.name"] = "octocat"
+    path = world / ".nightshift" / "nightshift.yaml"
+    path.parent.mkdir()
+    path.write_text(f"user: me\nboards:\n- url: {BOARD}\nrepos:\n- path: {clone}\n")
+    result = runner.invoke(app, ["init", "--yes"], input="\n\n\n\n")
+    assert "picked up [me]" in result.output
