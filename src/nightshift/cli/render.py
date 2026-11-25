@@ -43,7 +43,7 @@ def report(console: Console, result: Report) -> None:
             head = "Issues" if i == 0 else ""
             console.print(
                 f"  {head:<10} [{colour}]{slug:<{width}}  {count.open:>{digits}} open, "
-                f"{count.labelled} nightshift, {count.assigned} assigned to {result.user}"
+                f"{count.labelled} nightshift ({count.assigned} assigned to {result.user})"
                 f"   {word}[/]"
             )
     if result.unavailable:

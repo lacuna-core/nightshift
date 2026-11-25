@@ -11,7 +11,6 @@ from nightshift.errors import ToolError
 from nightshift.model import Brief, Limit
 from nightshift.proc import Runner
 
-PERMISSION_MODE = "acceptEdits"
 _TAIL = 512 * 1024
 _MAX_TEXT = 20_000
 _MAX_COMMENTS = 20
@@ -125,13 +124,13 @@ def _limit(entry: dict[str, Any]) -> Limit:
     return Limit(resets_at, at)
 
 
-def start_args(session_id: str, prompt: str) -> list[str]:
-    return ["--permission-mode", PERMISSION_MODE, "--session-id", session_id, prompt]
+def start_args(session_id: str, prompt: str, mode: str) -> list[str]:
+    return ["--permission-mode", mode, "--session-id", session_id, prompt]
 
 
-def resume_line(session_id: str, message: str | None) -> str:
+def resume_line(session_id: str, message: str | None, mode: str) -> str:
     """The command that resumes a session, as typed into a shell. Holds no outside text."""
-    parts = ["claude", "--permission-mode", PERMISSION_MODE, "--resume", session_id]
+    parts = ["claude", "--permission-mode", mode, "--resume", session_id]
     return shlex.join([*parts, message] if message else parts)
 
 

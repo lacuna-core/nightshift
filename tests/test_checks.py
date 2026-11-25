@@ -85,6 +85,7 @@ def run(
     home: Path | None = None,
     homes: Homes | None = None,
     user: str = "me",
+    mode: str = "auto",
 ) -> Report:
     tools = FakeRunner(
         {
@@ -93,7 +94,11 @@ def run(
         }
     )
     config: ProjectConfig = parse_config(
-        {"user": user, "boards": [{"url": BOARD}], "repos": [{"path": str(c)} for c in clones]}
+        {
+            "user": user,
+            "boards": [{"url": BOARD}],
+            "repos": [{"path": str(c), "permission_mode": mode} for c in clones],
+        }
     )
     claude = Claude(tools, home or clones[0].parent)
     checks = Checks(tracker, Herdr(tools), claude, Git(proc.run), homes)
@@ -125,6 +130,12 @@ def test_missing_status(clone: Path) -> None:
     assert report.failed
     assert not report.fatal
     assert texts(report, Level.FAIL) == ["missing: In Review"]
+
+
+def test_status_in_other_case(clone: Path) -> None:
+    tracker = FakeTracker()
+    tracker.overview = BoardOverview(BOARD, ("todo", "In progress", "In review"))
+    assert not run(tracker, clone).failed
 
 
 def test_board_not_found(clone: Path) -> None:
@@ -197,9 +208,11 @@ def test_same_repo_twice(clone: Path, tmp_path: Path) -> None:
 def test_allowlist_and_trust_warnings(clone: Path) -> None:
     (clone / ".claude" / "settings.json").write_text('{"permissions": {"allow": ["Bash(git:*)"]}}')
     (clone.parent / ".claude.json").write_text('{"projects": {}}')
-    warnings = texts(run(FakeTracker(), clone), Level.WARN)
+    warnings = texts(run(FakeTracker(), clone, mode="acceptEdits"), Level.WARN)
     assert warnings[0].startswith(".claude/settings.json does not allow gh pr create:")
     assert "does not trust" in warnings[1]
+    # in auto mode Claude Code decides, so the allowlist does not matter
+    assert texts(run(FakeTracker(), clone), Level.WARN) == warnings[1:]
 
 
 def test_worktree_is_not_a_clone(clone: Path, tmp_path: Path) -> None:
@@ -208,6 +221,17 @@ def test_worktree_is_not_a_clone(clone: Path, tmp_path: Path) -> None:
     subprocess.run([*git, "worktree", "add", "-q", str(tmp_path / "wt")], check=True)
     assert Git(proc.run).is_clone(clone)
     assert not Git(proc.run).is_clone(tmp_path / "wt")
+
+
+def test_clone_of(clone: Path, tmp_path: Path) -> None:
+    git = ["git", "-C", str(clone), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    subprocess.run([*git, "worktree", "add", "-q", str(tmp_path / "wt")], check=True)
+    (clone / "src").mkdir()
+    for inside in (clone, clone / "src", tmp_path / "wt"):
+        assert Git(proc.run).clone_of(inside) == clone.resolve()
+    assert Git(proc.run).clone_of(tmp_path) is None
+    assert Git(proc.run).clone_of(tmp_path / "missing") is None
 
 
 def test_no_gh(clone: Path) -> None:

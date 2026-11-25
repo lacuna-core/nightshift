@@ -380,7 +380,9 @@ class Executor:
                     run_id=run.id,
                     ticket=f"{run.repo}#{run.ticket_id}",
                     claude_args=claude_code.start_args(
-                        run.claude_session_id or "", claude_code.prompt(brief, run.branch)
+                        run.claude_session_id or "",
+                        claude_code.prompt(brief, run.branch),
+                        repo.config.permission_mode,
                     ),
                 )
                 self._herdr.mark_shell(terminal)
@@ -443,7 +445,10 @@ class Executor:
             return
         run = self._store.update_run(run, resume_count=run.resume_count + 1)
         logger.info("resuming the lost agent")
-        line = claude_code.resume_line(run.claude_session_id or "", message)
+        repo = self._repos(run.repo_ref)
+        # The repo's mode; if it cannot be read now, the stricter one, never more than it allows.
+        mode = repo.config.permission_mode if repo is not None else "acceptEdits"
+        line = claude_code.resume_line(run.claude_session_id or "", message, mode)
         self._herdr.send(terminal.address, line)
         if not self._herdr.wait_for_claude(terminal.address, self._sleep):
             # The shell may have asked something first, which took the line as its answer.

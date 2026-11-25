@@ -84,7 +84,7 @@ def _ask(boundaries: Boundaries, current: ProjectConfig | None) -> ProjectConfig
     while True:
         user = _ask_user(boundaries, current)
         boards = _ask_boards(boundaries, current)
-        repos = _ask_repos(current)
+        repos = _ask_repos(boundaries, current)
         try:
             return _combine(user, boards, repos, current)
         except ConfigError as e:
@@ -104,6 +104,7 @@ def _combine(
         if old is not None:
             entry["stall_timeout"] = format_duration(old.stall_timeout)
             entry["max_run_time"] = format_duration(old.max_run_time)
+            entry["permission_mode"] = old.permission_mode
         entries.append(entry)
     return parse_config(
         {
@@ -115,8 +116,9 @@ def _combine(
 
 
 def _ask_user(boundaries: Boundaries, current: ProjectConfig | None) -> str:
-    """Whose tickets are picked up. Suggested: the current value, else the git user (git's
-    ``github.user``, or ``user.name`` if it looks like a GitHub login), else the `gh` login.
+    """Whose tickets are picked up. Suggested: the current value, else git's ``github.user``,
+    else the `gh` login. Not git's ``user.name``: it is a display name, even when it looks
+    like a login. A login that does not exist on GitHub is asked for again.
     """
     import contextlib
 
@@ -126,19 +128,22 @@ def _ask_user(boundaries: Boundaries, current: ProjectConfig | None) -> str:
     login: str | None = None
     with contextlib.suppress(NightshiftError):
         login = boundaries.tracker.login()[0] or None
-    git_user = next(
-        (
-            value
-            for key in ("github.user", "user.name")
-            if (value := boundaries.git.config(key, Path.cwd())) and is_login(value)
-        ),
-        None,
-    )
-    default = current.user if current else git_user or login
+    git_user = boundaries.git.config("github.user", Path.cwd())
+    default = current.user if current else (git_user if git_user and is_login(git_user) else login)
     if default and login and default.lower() != login.lower():
         console.print(f"[yellow]Note[/] `gh` is logged in as {escape(login)}: agents act as them.")
-    answer = typer.prompt("GitHub login whose assigned tickets are picked up", default=default)
-    return str(answer).strip()
+    while True:
+        answer = str(
+            typer.prompt("GitHub login whose assigned tickets are picked up", default=default)
+        ).strip()
+        try:
+            if boundaries.tracker.user_exists(answer):
+                return answer
+        except NightshiftError:
+            return answer  # GitHub cannot say now; `check` reports it later
+        hint = f" `gh` is logged in as {escape(login)}." if login else ""
+        console.print(f"[red]problem[/] There is no GitHub user {escape(answer)}.{hint}")
+        default = login
 
 
 def _ask_boards(boundaries: Boundaries, current: ProjectConfig | None) -> list[tuple[str, int]]:
@@ -170,8 +175,20 @@ def _ask_boards(boundaries: Boundaries, current: ProjectConfig | None) -> list[t
     return boards
 
 
-def _ask_repos(current: ProjectConfig | None) -> list[str]:
-    default = ", ".join(str(r.path) for r in current.repos) if current else None
+def _ask_repos(boundaries: Boundaries, current: ProjectConfig | None) -> list[str]:
+    """Suggested: the repos of the current file, plus the clone `init` is run in."""
+    import contextlib
+
+    from nightshift.errors import NightshiftError
+
+    here: Path | None = None
+    with contextlib.suppress(NightshiftError):
+        here = boundaries.git.clone_of(Path.cwd())
+    paths = [r.path for r in current.repos] if current else []
+    if here is not None and not any(p.resolve() == here.resolve() for p in paths):
+        console.print(f"This folder is in the clone {escape(str(here))}: suggesting it.")
+        paths.append(here)
+    default = ", ".join(str(p) for p in paths) or None
     answer = typer.prompt("Repos (paths of local clones, separated by commas)", default=default)
     return _split(answer)
 

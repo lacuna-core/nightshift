@@ -36,6 +36,16 @@ class Git:
             and lines[1] == lines[2]
         )
 
+    def clone_of(self, path: Path) -> Path | None:
+        """The clone ``path`` is in, also from inside one of its worktrees; None if none."""
+        if not path.is_dir():
+            return None
+        result = self._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        common = Path(result.out.strip())
+        if result.code != 0 or common.name != ".git":
+            return None  # not in git, or a bare repo or a separate git dir
+        return common.parent if self.is_clone(common.parent) else None
+
     def config(self, key: str, cwd: Path) -> str | None:
         """A git setting as git sees it in ``cwd``, or None if it is not set."""
         result = self._git(cwd, "config", "--get", key)

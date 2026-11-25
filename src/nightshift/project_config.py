@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import (
@@ -23,6 +23,9 @@ from nightshift.errors import ConfigError
 DEFAULT_MAX_PARALLEL_AGENTS = 5
 DEFAULT_STALL_TIMEOUT = timedelta(minutes=20)
 DEFAULT_MAX_RUN_TIME = timedelta(hours=3)
+
+PermissionMode = Literal["auto", "acceptEdits"]
+DEFAULT_PERMISSION_MODE: PermissionMode = "auto"
 
 _BOARD_URL = re.compile(
     r"https://github\.com/(?P<kind>users|orgs)/(?P<owner>[A-Za-z0-9-]+)"
@@ -127,6 +130,11 @@ class RepoConfig(_Model):
 
     max_run_time: Duration = DEFAULT_MAX_RUN_TIME
     """How long a run may be running. Unset: 3h."""
+
+    permission_mode: PermissionMode = DEFAULT_PERMISSION_MODE
+    """Claude Code's permission mode for the agents. ``auto``: Claude Code decides what is
+    safe to run. ``acceptEdits``: edits are allowed, commands only as the repo's allowlist
+    says. Unset: auto."""
 
     @field_validator("path")
     @classmethod

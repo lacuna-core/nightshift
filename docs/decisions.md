@@ -184,3 +184,18 @@ after a run counts as taking it over, like removing the label.
 **Consequences:** Several people can share a board, each with their own Nightshift. Every
 ticket now needs an assignee as well as the label, one more step for a solo user, and
 existing configs must add `user`.
+
+## 2026-11-24 — Agents run in Claude Code's auto mode by default
+
+**Context:** In `acceptEdits` mode every command an agent needs, from commits to the repo's
+tests, must be in the repo's allowlist, or the agent stops and waits. Keeping that list
+complete was the main chore of adding a repo. This replaces the fixed `acceptEdits` mode
+of FR-8.
+
+**Decision:** Each repo has a `permission_mode`, `auto` by default, in which Claude Code's
+own judgement decides what is safe to run; `acceptEdits` with the allowlist stays
+available. `bypassPermissions` is still never used.
+
+**Consequences:** A new repo needs no allowlist, but what an agent may run, with the
+user's `gh` login, is now Claude Code's call rather than a list the user wrote. A run
+resumed while its repo cannot be read uses the stricter `acceptEdits`.

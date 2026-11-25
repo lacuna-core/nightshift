@@ -46,7 +46,7 @@ def test_lost_agent_is_resumed_once(world: World) -> None:
     assert "sent" not in world.terminal()
     world.tick()
     assert world.terminal()["sent"] == [
-        f"claude --permission-mode acceptEdits --resume {session} continue"
+        f"claude --permission-mode auto --resume {session} continue"
     ]
     assert world.state() is RunState.RUNNING
     world.tick(3)

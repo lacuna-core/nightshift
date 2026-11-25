@@ -53,7 +53,7 @@ def test_how_the_agent_is_started(world: World) -> None:
     argv = argv[2:]
     assert argv[:4] == ["/bin/zsh", "-l", "-i", "-c"]
     assert argv[4] == 'claude "$@"; exec /bin/zsh -l -i'
-    assert argv[6:8] == ["--permission-mode", "acceptEdits"]
+    assert argv[6:8] == ["--permission-mode", "auto"]
     assert argv[8:10] == ["--session-id", world.run().claude_session_id]
     prompt = argv[10]
     assert "$(rm -rf /)" in prompt

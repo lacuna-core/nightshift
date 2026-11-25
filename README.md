@@ -15,17 +15,21 @@ comment saying why.
 - [herdr-app](https://github.com/herdrdev/herdr-app) with herdr-core 0.1.18 or a later 0.1 (`hc`
   on `PATH`)
 - [Claude Code](https://claude.com/claude-code), logged in
-- A GitHub Project whose Status field has `Todo`, `In Progress` and `In Review`
+- A GitHub Project whose Status field has `Todo`, `In Progress` and `In Review` (in any
+  case: GitHub's own board template, with `In progress` and `In review`, works)
 - Local clones of the repos. In each:
   - run `claude` once and accept the trust dialog;
-  - allow at least `git commit`, `git push` and `gh pr create` in `.claude/settings.json`,
-    committed to the repo. Agents run in `acceptEdits` mode; a permission prompt nobody
-    answers makes the ticket wait for you.
+  - agents run in Claude Code's `auto` permission mode by default. With
+    `permission_mode: acceptEdits`, allow at least `git commit`, `git push` and
+    `gh pr create` in `.claude/settings.json`, committed to the repo. A permission prompt
+    nobody answers makes the ticket wait for you.
 
 ## Install and set up
 
 ```bash
 uv tool install git+https://github.com/lacuna-core/nightshift
+uv tool install --reinstall /path/to/nightshift     # A snapshot of the code as it is now
+uv tool install --editable /path/to/nightshift      # the `nightshift` command runs whatever is in the folder at the time
 nightshift init     # choose boards and repos; writes ~/.nightshift/nightshift.yaml
 nightshift check    # what is missing, and how to fix it
 nightshift start    # runs in the foreground
@@ -41,6 +45,7 @@ repos:
   - path: ~/dev/webapp
     stall_timeout: 40m        # optional, default 20m
     max_run_time: 5h          # optional, default 3h
+    permission_mode: acceptEdits  # optional, default auto
 ```
 
 Changes take effect when Nightshift restarts. `NIGHTSHIFT_LOG_LEVEL` (default `INFO`) sets the

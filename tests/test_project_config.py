@@ -35,6 +35,7 @@ repos:
   - path: ~/dev/api
     stall_timeout: 40m
     max_run_time: 5h
+    permission_mode: acceptEdits
 """,
         )
     )
@@ -43,6 +44,7 @@ repos:
     assert config.repos[0].path == Path.home() / "dev/webapp"
     assert config.repos[0].stall_timeout == timedelta(minutes=20)
     assert config.repos[1].max_run_time == timedelta(hours=5)
+    assert [r.permission_mode for r in config.repos] == ["auto", "acceptEdits"]
 
 
 @pytest.mark.parametrize(
@@ -93,6 +95,14 @@ repos:
         (
             {
                 "user": "me",
+                "boards": [{"url": BOARD}],
+                "repos": [{"path": "/a", "permission_mode": "bypassPermissions"}],
+            },
+            "repos[0].permission_mode: ",
+        ),
+        (
+            {
+                "user": "me",
                 "boards": [{"url": BOARD}, {"url": BOARD + "/"}],
                 "repos": [{"path": "/a"}],
             },
@@ -139,7 +149,7 @@ def test_save_leaves_out_defaults_and_keeps_the_rest(tmp_path: Path) -> None:
             "boards": [{"url": BOARD, "max_parallel_agents": 2}],
             "repos": [
                 {"path": "~/dev/a", "stall_timeout": "40m"},
-                {"path": "/srv/b", "max_run_time": "3h"},
+                {"path": "/srv/b", "max_run_time": "3h", "permission_mode": "acceptEdits"},
             ],
         }
     )
@@ -148,6 +158,7 @@ def test_save_leaves_out_defaults_and_keeps_the_rest(tmp_path: Path) -> None:
     assert path.read_text() == (
         "user: me\n"
         f"boards:\n- url: {BOARD}\n  max_parallel_agents: 2\n"
-        "repos:\n- path: ~/dev/a\n  stall_timeout: 40m\n- path: /srv/b\n"
+        "repos:\n- path: ~/dev/a\n  stall_timeout: 40m\n"
+        "- path: /srv/b\n  permission_mode: acceptEdits\n"
     )
     assert load_config(path) == config

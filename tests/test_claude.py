@@ -22,9 +22,11 @@ def test_long_text_is_cut() -> None:
 
 
 def test_arguments() -> None:
-    assert start_args("s", "p") == ["--permission-mode", "acceptEdits", "--session-id", "s", "p"]
-    assert resume_line("s", None) == "claude --permission-mode acceptEdits --resume s"
-    assert resume_line("s", "a b").endswith(" --resume s 'a b'")
+    assert start_args("s", "p", "auto") == ["--permission-mode", "auto", "--session-id", "s", "p"]
+    assert (
+        resume_line("s", None, "acceptEdits") == "claude --permission-mode acceptEdits --resume s"
+    )
+    assert resume_line("s", "a b", "auto").endswith(" --resume s 'a b'")
 
 
 def test_allow_rules() -> None:

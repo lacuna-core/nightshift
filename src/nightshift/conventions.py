@@ -8,6 +8,13 @@ IN_REVIEW = "In Review"
 DONE = "Done"
 REQUIRED_STATUSES = (TODO, IN_PROGRESS, IN_REVIEW)
 
+
+def status_name(name: str) -> str:
+    """A board's status as one of ours if it differs only in case (GitHub's own template has
+    "In progress"), else as it is."""
+    return next((s for s in REQUIRED_STATUSES if s.casefold() == name.casefold()), name)
+
+
 LABEL = "nightshift"
 NEEDS_HUMAN = "nightshift:needs-human"
 LABELS = {

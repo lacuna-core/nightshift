@@ -30,7 +30,8 @@ def handler(request: httpx.Request) -> httpx.Response:
     query = json.loads(request.content)["query"]
     data: dict[str, Any]
     if "user(login:$l)" in query:
-        data = {"user": {"login": "me"}}
+        login = json.loads(request.content)["variables"]["l"]
+        data = {"user": None if login in missing_users else {"login": login}}
     elif "viewer{" in query:
         node = {"url": BOARD, "title": "Factory", "closed": False}
         data = {"viewer": {"projectsV2": {"nodes": [node]}, "organizations": {"nodes": []}}}
@@ -57,6 +58,7 @@ def handler(request: httpx.Request) -> httpx.Response:
 
 
 created: list[str] = []
+missing_users = {"Lacuna"}
 git_config: dict[str, str] = {}
 
 
@@ -110,7 +112,7 @@ def test_init_again_keeps_optional_settings(world: Path, clone: Path) -> None:  
     path.parent.mkdir()
     path.write_text(
         f"user: me\nboards:\n- url: {BOARD}\n  max_parallel_agents: 3\n"
-        f"repos:\n- path: {clone}\n  stall_timeout: 40m\n"
+        f"repos:\n- path: {clone}\n  stall_timeout: 40m\n  permission_mode: acceptEdits\n"
     )
     before = load_config(path)
     result = runner.invoke(app, ["init"], input="\n\n\n\nn\n")
@@ -118,6 +120,20 @@ def test_init_again_keeps_optional_settings(world: Path, clone: Path) -> None:  
     result = runner.invoke(app, ["init", "--yes"], input="\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert load_config(path) == before
+
+
+def test_init_suggests_the_clone_it_is_run_in(world: Path, clone: Path) -> None:  # noqa: F811
+    # the fake git runs in the clone, as if `init` were run there
+    result = runner.invoke(app, ["init"], input="\n1\n2\n\n")
+    assert result.exit_code == 0, result.output
+    config = load_config(world / ".nightshift" / "nightshift.yaml")
+    assert [r.path for r in config.repos] == [clone]
+
+
+def test_init_suggests_no_repo_outside_git(world: Path) -> None:
+    (world / "web").mkdir()
+    result = runner.invoke(app, ["init"], input=f"\n{BOARD}\n\n{world / 'web'}\n")
+    assert "Repos (paths of local clones, separated by commas):" in result.output
 
 
 def test_init_writes_also_if_a_check_fails(world: Path) -> None:
@@ -140,9 +156,10 @@ def test_fake_runner_is_strict() -> None:
 @pytest.mark.parametrize(
     ("settings", "suggested"),
     [
-        ({"user.name": "octocat"}, "octocat"),
+        ({"user.name": "octocat"}, "me"),  # a display name, even if it looks like a login
         ({"github.user": "hubber", "user.name": "octocat"}, "hubber"),
-        ({"user.name": "Octo Cat"}, "me"),  # a display name, not a login: the gh login
+        ({"user.name": "Octo Cat"}, "me"),
+        ({"github.user": "Octo Cat"}, "me"),  # not a login at all
         ({}, "me"),
     ],
 )
@@ -166,3 +183,14 @@ def test_init_again_suggests_the_current_user(world: Path, clone: Path) -> None:
     path.write_text(f"user: me\nboards:\n- url: {BOARD}\nrepos:\n- path: {clone}\n")
     result = runner.invoke(app, ["init", "--yes"], input="\n\n\n\n")
     assert "picked up [me]" in result.output
+
+
+def test_init_asks_again_for_a_login_that_does_not_exist(
+    world: Path,
+    clone: Path,  # noqa: F811
+) -> None:
+    git_config["github.user"] = "Lacuna"
+    result = runner.invoke(app, ["init"], input=f"\n\n1\n2\n{clone}\n")
+    assert "There is no GitHub user Lacuna" in result.output
+    assert "picked up [me]" in result.output
+    assert load_config(world / ".nightshift" / "nightshift.yaml").user == "me"

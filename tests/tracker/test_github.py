@@ -291,6 +291,17 @@ def test_read_board_without_a_status() -> None:
     assert answers(body).read_board(BOARD).problem
 
 
+def test_statuses_that_differ_only_in_case_are_ours() -> None:
+    # GitHub's own board template names them "In progress" and "In review"
+    board = answers(
+        board_page(
+            candidate(3, status="In progress"), statuses=("Todo", "In progress", "In review")
+        )
+    ).read_board(BOARD)
+    assert board.problem is None
+    assert [i.status for i in board.items] == ["In Progress"]
+
+
 def test_set_status_uses_the_ids_of_the_board() -> None:
     seen: list[Any] = []
 

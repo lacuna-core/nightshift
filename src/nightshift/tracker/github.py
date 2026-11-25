@@ -13,7 +13,14 @@ from urllib.parse import quote
 
 import httpx
 
-from nightshift.conventions import IN_PROGRESS, LABEL, LABELS, REQUIRED_STATUSES, TODO
+from nightshift.conventions import (
+    IN_PROGRESS,
+    LABEL,
+    LABELS,
+    REQUIRED_STATUSES,
+    TODO,
+    status_name,
+)
 from nightshift.errors import (
     TrackerAuthError,
     TrackerError,
@@ -257,7 +264,7 @@ class GitHub:
             f'is:issue is:open label:{LABEL} status:"{TODO}","{IN_PROGRESS}"',
         ):
             status_field = project["field"] or {}
-            options = {o["name"]: o["id"] for o in status_field.get("options", [])}
+            options = {status_name(o["name"]): o["id"] for o in status_field.get("options", [])}
             if missing := [s for s in REQUIRED_STATUSES if s not in options]:
                 return Board(url, problem=f"the status {', '.join(missing)} is missing")
             self._boards[url] = _BoardIds(project["id"], status_field["id"], options)
@@ -486,7 +493,8 @@ def _time(text: str) -> datetime:
 
 
 def _status(node: dict[str, Any]) -> str | None:
-    return (node.get("fieldValueByName") or {}).get("name")
+    name = (node.get("fieldValueByName") or {}).get("name")
+    return status_name(name) if isinstance(name, str) else None
 
 
 def _logins(issue: dict[str, Any]) -> frozenset[str]:

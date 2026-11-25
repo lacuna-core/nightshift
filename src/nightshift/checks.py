@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from nightshift.claude import Claude
-from nightshift.conventions import HERDR_TESTED, LABELS, REQUIRED_STATUSES
+from nightshift.conventions import HERDR_TESTED, LABELS, REQUIRED_STATUSES, status_name
 from nightshift.errors import (
     NightshiftError,
     ToolError,
@@ -54,7 +54,7 @@ class BoardReport:
 
     @property
     def missing(self) -> tuple[str, ...]:
-        have = self.overview.statuses if self.overview else ()
+        have = {status_name(s) for s in self.overview.statuses} if self.overview else set()
         return tuple(s for s in REQUIRED_STATUSES if s not in have)
 
     @property
@@ -207,7 +207,7 @@ class Checks:
         reports: list[RepoReport] = []
         seen: dict[str, Path] = {}
         for repo in config.repos:
-            report = self._guard_repo(repo.path)
+            report = self._guard_repo(repo.path, repo.permission_mode)
             if report.info is not None:
                 first = seen.setdefault(report.info.ref, repo.path)
                 if first != repo.path:
@@ -220,13 +220,13 @@ class Checks:
             reports.append(report)
         return tuple(reports)
 
-    def _guard_repo(self, path: Path) -> RepoReport:
+    def _guard_repo(self, path: Path, mode: str) -> RepoReport:
         try:
-            return self._repo(path)
+            return self._repo(path, mode)
         except NightshiftError as e:
             return RepoReport(path, (Finding(Level.FAIL, str(e), "See the message."),))
 
-    def _repo(self, path: Path) -> RepoReport:
+    def _repo(self, path: Path, mode: str) -> RepoReport:
         def failed(text: str, fix: str) -> RepoReport:
             return RepoReport(path, (Finding(Level.FAIL, text, fix),))
 
@@ -267,7 +267,7 @@ class Checks:
                         "`nightshift init` and `nightshift start` create it.",
                     )
                 )
-        if tools := self._claude.missing_tools(path):
+        if mode == "acceptEdits" and (tools := self._claude.missing_tools(path)):
             findings.append(
                 Finding(
                     Level.WARN,
@@ -275,7 +275,7 @@ class Checks:
                     "every agent would stop and wait for you",
                     "Add them to permissions.allow, e.g. "
                     + ", ".join(f'"Bash({tool} *)"' for tool in tools)
-                    + ".",
+                    + ", or set `permission_mode: auto` for the repo in nightshift.yaml.",
                 )
             )
         if self._claude.trusts(path) is False:
